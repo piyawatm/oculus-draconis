@@ -1,0 +1,19 @@
+# Ignore virtual environment directories
+/venv/
+*/venv/
+.env/
+*/.env/
+# Ignore Python cache files
+__pycache__/
+*.pyc
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Ignore VSCode settings
+.vscode/
+# Ignore log files
+*.log
+# Ignore data and results
+/data/
+/results/
+# Ignore model checkpoints
+/checkpoints/
