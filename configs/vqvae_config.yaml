@@ -1,0 +1,19 @@
+# Training settings for VQ-VAE stage
+data:
+  dataset: cifar10
+  root: ./data
+  image_size: 32
+  batch_size: 128
+  num_workers: 4
+
+model:
+  codebook_size: 512
+  embed_dim: 256
+  downsample_factor: 4
+  beta: 0.25
+
+train:
+  epochs: 50
+  lr: 2e-4
+  seed: 42
+  save_path: checkpoints/vqvae.pt
