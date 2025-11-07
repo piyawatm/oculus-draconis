@@ -5,7 +5,7 @@ from torchmetrics.image.inception import InceptionScore
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
-from models.priors.bdh import BDHPrior  # or GPTPrior
+from models.priors.gpt import GPTPrior  # or GPTPrior
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
@@ -28,8 +28,8 @@ K_code = 512
 K_vocab = K_code + 1
 Hc, Wc = 8, 8
 T = Hc * Wc
-prior = BDHPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
+prior = GPTPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
+prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
 
 # ------------- metrics -------------
 fid = FrechetInceptionDistance(feature=2048).to(device)

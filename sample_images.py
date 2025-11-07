@@ -17,7 +17,7 @@ vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
 prior = BDHPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
+prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
 
 # sampling
 B = 16
@@ -26,5 +26,5 @@ ids = prior.generate(bos, max_new_tokens=T)                          # [B, 65]
 codes = ids[:, 1:].contiguous().view(B, Hc, Wc)                      # drop BOS -> [B,8,8]
 
 imgs = vq.decode(codes).clamp(0, 1)
-save_image(imgs, "samples_bdh.png", nrow=4)
-print("Wrote samples_bdh.png")
+save_image(imgs, "samples_gpt.png", nrow=4)
+print("Wrote samples_gpt.png")
