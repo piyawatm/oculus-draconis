@@ -1,16 +1,30 @@
 import torch
 from torchvision.utils import save_image
 from models.vqvae import VQVAE
-from models.priors.bdh import BDHPrior
+from models.priors.bdh import BDHPrior  # or GPTPrior
 
-B, T, Hc, Wc, K = 16, 64, 8, 8, 512
-vq = VQVAE(codebook_size=K, embed_dim=256, downsample_factor=4).cuda().eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae.pt"))
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-prior = BDHPrior(vocab_size=K, d_model=256, n_layer=6, n_head=4, block_size=T).cuda().eval()
-prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt"))
+# VQ-VAE specifics
+Hc, Wc = 8, 8
+T = Hc * Wc           # 64
+K_code = 512
+K_vocab = K_code + 1  # 513 with BOS
+bos_id = K_code       # 512
 
-bos = torch.zeros(B, 1, dtype=torch.long, device="cuda")  # or your BOS id
-ids = prior.generate(bos, max_new_tokens=T)[:, 1:].view(B, Hc, Wc)
-imgs = vq.decode(ids).clamp(0, 1)
+# load models
+vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
+vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
+
+prior = BDHPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
+prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
+
+# sampling
+B = 16
+bos = torch.full((B, 1), bos_id, dtype=torch.long, device=device)    # [B,1]
+ids = prior.generate(bos, max_new_tokens=T)                          # [B, 65]
+codes = ids[:, 1:].contiguous().view(B, Hc, Wc)                      # drop BOS -> [B,8,8]
+
+imgs = vq.decode(codes).clamp(0, 1)
 save_image(imgs, "samples_bdh.png", nrow=4)
+print("Wrote samples_bdh.png")

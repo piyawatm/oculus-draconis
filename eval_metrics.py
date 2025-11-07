@@ -39,22 +39,26 @@ for x, _ in real_loader:
 # generate at least ~10k images
 target = 10000
 seen = 0
-prior.eval(); vq.eval()
+
+Hc, Wc = 8, 8
+T = Hc * Wc
+K_code = 512
+K_vocab = K_code + 1
+bos_id = K_code
 
 while seen < target:
     b = min(B, target - seen)
-    # sample exactly T tokens total (no BOS path)
-    start = torch.randint(0, K, (b, 1), device=device)
-    ids = prior.generate(start, max_new_tokens=T-1)      # [b, T]
-    codes = ids.view(b, Hc, Wc)
-    imgs = vq.decode(codes).clamp(0, 1)                  # float [0,1]
+    bos = torch.full((b, 1), bos_id, dtype=torch.long, device=device)
+    ids = prior.generate(bos, max_new_tokens=T)            # [b,65]
+    codes = ids[:, 1:].view(b, Hc, Wc)                     # [b,8,8]
+    imgs = vq.decode(codes).clamp(0, 1)
+    imgs_u8 = (imgs * 255.0).clamp(0, 255).to(torch.uint8)
 
-    # update metrics (FID needs uint8; IS can take float or uint8 — we’ll use uint8 for consistency)
-    imgs_u8 = to_u8(imgs)
     fid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
 
     seen += b
+
 
 print("FID:", float(fid.compute()))
 m, s = iscore.compute()

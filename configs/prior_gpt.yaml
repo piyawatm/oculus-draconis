@@ -1,18 +1,18 @@
 # GPT-style prior baseline
 model:
   name: GPTPrior
-  vocab_size: 512
+  vocab_size: 513   # K_code + 1 for BOS
   d_model: 256
   n_layer: 6
   n_head: 4
-  block_size: 64
+  block_size: 65    # T + 1 (T = 64 for 8x8 grid)
   mlp_mult: 4
   dropout: 0.1
 
 train:
   epochs: 30
   batch_size: 128
-  lr: 0.0003
+  lr: 3e-4
   clip_grad: 1.0
   seed: 42
   save_path: checkpoints/gpt_prior.pt
