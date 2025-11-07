@@ -3,9 +3,10 @@ import torch, torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from utils import set_seed
 import yaml
+import time
 
 # ---- load config / seed
-cfg = yaml.safe_load(open("configs/prior_gpt.yaml"))
+cfg = yaml.safe_load(open("configs/prior_bdh.yaml"))
 set_seed(int(cfg["train"]["seed"]))
 
 K_vocab = int(cfg["model"]["vocab_size"])  # e.g., 513
@@ -45,16 +46,26 @@ prior = Prior(**model_cfg).to(device)
 
 opt = torch.optim.AdamW(prior.parameters(), lr=LR)
 
+total_training_time = 0 
 # ---- train
 for epoch in range(int(cfg["train"]["epochs"])):
+    epoch_start_time = time.time()
     prior.train()
+    epoch_loss = 0
+    num_batches = 0 
     for x, y in dl:
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)  # [B,64]
         logits = prior(x)                         # [B,64,K_vocab]
         loss = F.cross_entropy(logits.reshape(-1, K_vocab), y.reshape(-1))
         opt.zero_grad(); loss.backward(); opt.step()
-    print(f"Epoch {epoch:03d} | loss={loss.item():.4f}")
+        epoch_loss += loss.item()
+        num_batches += 1 
+    epoch_time = time.time() - epoch_start_time  # ADD THIS
+    total_training_time += epoch_time  # ADD THIS
+    avg_loss = epoch_loss / num_batches 
+    print(f"Epoch {epoch:03d} | loss={avg_loss:.4f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
 
 # ---- save
 torch.save(prior.state_dict(), SAVE)
 print(f"Saved → {SAVE}")
+print(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")

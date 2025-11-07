@@ -1,11 +1,12 @@
 # eval_metrics.py (fixed dtype handling + fewer workers)
 import torch
 from torchmetrics.image.fid import FrechetInceptionDistance
+from torchmetrics.image.kid import KernelInceptionDistance
 from torchmetrics.image.inception import InceptionScore
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
-from models.priors.gpt import GPTPrior  # or GPTPrior
+from models.priors.bdh import BDHPrior  # or GPTPrior
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
@@ -28,17 +29,19 @@ K_code = 512
 K_vocab = K_code + 1
 Hc, Wc = 8, 8
 T = Hc * Wc
-prior = GPTPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
+prior = BDHPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
+prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
 
 # ------------- metrics -------------
 fid = FrechetInceptionDistance(feature=2048).to(device)
+kid = KernelInceptionDistance(subset_size=50).to(device)
 iscore = InceptionScore().to(device)
 
 # real features (uint8)
 for x, _ in real_loader:
     x_u8 = to_u8(x).to(device, non_blocking=True)  # uint8 NCHW
     fid.update(x_u8, real=True)
+    kid.update(x_u8, real=True)
 
 # generate at least ~10k images
 target = 10000
@@ -59,11 +62,14 @@ while seen < target:
     imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
 
     fid.update(imgs_u8.to(device), real=False)
+    kid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
 
     seen += b
 
 
 print("FID:", float(fid.compute()))
+kid_mean, kid_std = kid.compute()
+print("KID:", float(kid_mean), "+/-", float(kid_std))
 m, s = iscore.compute()
 print("IS:", float(m), "+/-", float(s))
