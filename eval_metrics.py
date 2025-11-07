@@ -6,9 +6,24 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
 from models.priors.gpt import GPTPrior  # or GPTPrior
+import torch.nn.functional as F
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
+
+def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
+    ids = bos
+    for _ in range(steps):
+        idx_cond = ids[:, -getattr(prior, "block_size", ids.size(1)):]
+        logits = prior(idx_cond)[:, -1, :] / max(1e-8, temperature)
+        logits[:, bos_id] = float("-inf")
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = float("-inf")
+        probs = F.softmax(logits, dim=-1)
+        next_id = torch.multinomial(probs, 1)
+        ids = torch.cat([ids, next_id], dim=1)
+    return ids[:, 1:]
 
 # ------------- helpers -------------
 def to_u8(x: torch.Tensor) -> torch.Tensor:
@@ -53,11 +68,10 @@ bos_id = K_code
 while seen < target:
     b = min(B, target - seen)
     bos = torch.full((b, 1), bos_id, dtype=torch.long, device=device)
-    ids = prior.generate(bos, max_new_tokens=T)            # [b,65]
-    codes = ids[:, 1:].view(b, Hc, Wc)                     # [b,8,8]
+    codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [b,64]
+    codes = codes_seq.view(b, Hc, Wc)
     imgs = vq.decode(codes).clamp(0, 1)
     imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
-
     fid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
 
