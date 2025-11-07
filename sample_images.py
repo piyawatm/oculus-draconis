@@ -1,7 +1,7 @@
 import torch
 from torchvision.utils import save_image
 from models.vqvae import VQVAE
-from models.priors.bdh import BDHPrior  # or GPTPrior
+from models.priors.gpt import GPTPrior
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -16,7 +16,7 @@ bos_id = K_code       # 512
 vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
-prior = BDHPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
+prior = GPTPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
 
 # sampling
