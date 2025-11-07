@@ -24,7 +24,11 @@ real_loader = DataLoader(real, batch_size=B, shuffle=False, num_workers=2, pin_m
 vq = VQVAE(codebook_size=K, embed_dim=256, downsample_factor=4).to(device).eval()
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
-prior = BDHPrior(vocab_size=K, d_model=256, block_size=T).to(device).eval()
+K_code = 512
+K_vocab = K_code + 1
+Hc, Wc = 8, 8
+T = Hc * Wc
+prior = BDHPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
 
 # ------------- metrics -------------
@@ -52,7 +56,7 @@ while seen < target:
     ids = prior.generate(bos, max_new_tokens=T)            # [b,65]
     codes = ids[:, 1:].view(b, Hc, Wc)                     # [b,8,8]
     imgs = vq.decode(codes).clamp(0, 1)
-    imgs_u8 = (imgs * 255.0).clamp(0, 255).to(torch.uint8)
+    imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
 
     fid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
