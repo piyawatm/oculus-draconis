@@ -15,3 +15,6 @@ __pycache__/
 # Ignore data and results
 /data/
 /results/
+#Ignore checkpoints
+/checkpoints/
+.DS_Store

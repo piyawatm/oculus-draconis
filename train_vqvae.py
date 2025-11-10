@@ -18,6 +18,7 @@ print("Params:", count_parameters(model), "M")
 
 opt = optim.Adam(model.parameters(), lr=2e-4)
 total_training_time = 0
+epoch_times = []
 for epoch in range(50):
     epoch_start_time = time.time()
     epoch_loss = 0
@@ -36,6 +37,7 @@ for epoch in range(50):
         epoch_commitment += loss_dict["commitment"].item()
         num_batches += 1
     epoch_time = time.time() - epoch_start_time
+    epoch_times.append(epoch_time)
     total_training_time += epoch_time
     avg_loss = epoch_loss / num_batches
     avg_recon = epoch_recon / num_batches
@@ -49,4 +51,7 @@ for epoch in range(50):
 
 save_checkpoint(model, "checkpoints/vqvae.pt")
 print("Saved VQVAE checkpoint.")
+
+avg_epoch_time = sum(epoch_times) / len(epoch_times)
 print(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")
+print(f"Average epoch time: {avg_epoch_time:.2f} seconds")

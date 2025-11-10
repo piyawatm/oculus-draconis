@@ -46,7 +46,8 @@ prior = Prior(**model_cfg).to(device)
 
 opt = torch.optim.AdamW(prior.parameters(), lr=LR)
 
-total_training_time = 0 
+total_training_time = 0
+epoch_times = []
 # ---- train
 for epoch in range(int(cfg["train"]["epochs"])):
     epoch_start_time = time.time()
@@ -60,12 +61,17 @@ for epoch in range(int(cfg["train"]["epochs"])):
         opt.zero_grad(); loss.backward(); opt.step()
         epoch_loss += loss.item()
         num_batches += 1 
-    epoch_time = time.time() - epoch_start_time  # ADD THIS
-    total_training_time += epoch_time  # ADD THIS
+    total_training_time += epoch_time
+    epoch_times.append(epoch_time)
+    epoch_time = time.time() - epoch_start_time
+    total_training_time += epoch_time
     avg_loss = epoch_loss / num_batches 
     print(f"Epoch {epoch:03d} | loss={avg_loss:.4f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
 
 # ---- save
 torch.save(prior.state_dict(), SAVE)
 print(f"Saved → {SAVE}")
+
+avg_epoch_time = sum(epoch_times) / len(epoch_times)
 print(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")
+print(f"Average epoch time: {avg_epoch_time:.2f} seconds")

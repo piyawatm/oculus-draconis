@@ -1,5 +1,6 @@
 # eval_metrics.py (fixed dtype handling + fewer workers)
 import torch
+import os
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.kid import KernelInceptionDistance
 from torchmetrics.image.inception import InceptionScore
@@ -16,6 +17,20 @@ def to_u8(x: torch.Tensor) -> torch.Tensor:
     # expects float in [0,1]; returns uint8 in [0,255]
     return (x.clamp(0, 1) * 255.0).to(torch.uint8)
 
+def count_parameters(model):
+    """Count trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def measure_memory(model, input_sample):
+    """Measure GPU memory footprint (MB) during a single forward pass."""
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    with torch.no_grad():
+        _ = model(input_sample)
+    torch.cuda.synchronize()
+    mem_used = torch.cuda.max_memory_allocated() / (1024 ** 2)
+    return mem_used
+
 # ------------- real data -------------
 tfm = transforms.ToTensor()  # float in [0,1]
 real = datasets.CIFAR10("./data", train=False, download=True, transform=tfm)
@@ -31,6 +46,34 @@ Hc, Wc = 8, 8
 T = Hc * Wc
 prior = BDHPrior(vocab_size=K_vocab, d_model=256, block_size=T+1).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
+
+# >>> Model statistics section
+print("\n--- Model Stats ---")
+
+# Parameter counts
+vq_params = count_parameters(vq)
+prior_params = count_parameters(prior)
+print(f"VQVAE Parameters: {vq_params/1e6:.2f}M")
+print(f"BDH Prior Parameters: {prior_params/1e6:.2f}M")
+
+# Memory footprint (forward pass)
+if torch.cuda.is_available():
+    sample_codes = torch.randint(0, K, (1, Hc, Wc), device=device)
+    vq_mem = measure_memory(vq.decode, sample_codes)
+
+    bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
+    prior_mem = measure_memory(prior, bos)
+
+    print(f"VQVAE Memory Footprint: {vq_mem:.1f} MB")
+    print(f"BDH Prior Memory Footprint: {prior_mem:.1f} MB")
+else:
+    print("CUDA not available — skipping memory footprint measurement.")
+
+# Checkpoint sizes
+vq_size = os.path.getsize("checkpoints/vqvae.pt") / (1024 ** 2)
+prior_size = os.path.getsize("checkpoints/bdh_prior.pt") / (1024 ** 2)
+print(f"Checkpoint sizes — VQVAE: {vq_size:.1f} MB, BDH: {prior_size:.1f} MB\n")
+
 
 # ------------- metrics -------------
 fid = FrechetInceptionDistance(feature=2048).to(device)
