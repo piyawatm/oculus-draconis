@@ -108,7 +108,8 @@ class BDHAttention(nn.Module):
 
         # strictly causal: no attending to self, only to earlier tokens
         mask = torch.tril(torch.ones(T, T, device=Q.device, dtype=torch.bool), diagonal=-1)
-        scores = scores.masked_fill(~mask, -1e9)
+        neg = torch.finfo(scores.dtype).min
+        scores = scores.masked_fill(~mask, neg)
 
         attn = F.softmax(scores, dim=-1)  # [B,H,T,T]
 

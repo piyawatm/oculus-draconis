@@ -1,24 +1,25 @@
-# train_prior.py (BOS-aware)
-import torch, torch.nn.functional as F
+# train_prior.py (BOS-aware, AMP, silent stdout, logs to file)
+import os
+import sys
+import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from utils import set_seed
 import yaml
-import os
-import sys
 
 # ------------- logging setup (no terminal prints) -------------
 log_path = "logs/train_prior_log.txt"
 os.makedirs("logs", exist_ok=True)
 log_file = open(log_path, "w")
 
-def log(msg):
+def log(msg: str):
     log_file.write(msg + "\n")
     log_file.flush()
 
-# Redirect prints to nowhere
-sys.stdout = open(os.devnull, 'w')
+# Silence stdout
+sys.stdout = open(os.devnull, "w")
 
-# ---- load config / seed
+# ---- load config / seed ----
 cfg = yaml.safe_load(open("configs/prior_bdh.yaml"))
 set_seed(int(cfg["train"]["seed"]))
 
@@ -42,10 +43,11 @@ xb = torch.cat([bos_col, seq[:, :-1]], dim=1)  # [N, 64] ; first token = BOS
 yb = seq.clone()                               # [N, 64] ; predict original codes
 
 ds = TensorDataset(xb, yb)
-dl = DataLoader(ds, batch_size=BATCH, shuffle=True, num_workers=2, pin_memory=True)
+dl = DataLoader(ds, batch_size=BATCH, shuffle=True,
+                num_workers=2, pin_memory=True)
 
-# ---- build prior by name
-model_cfg = dict(cfg["model"])
+# ---- build prior by name ----
+model_cfg  = dict(cfg["model"])
 model_name = model_cfg.pop("name", "BDHPrior")
 if model_name == "BDHPrior":
     from models.priors.bdh import BDHPrior as Prior
@@ -55,21 +57,50 @@ else:
     raise ValueError(f"Unknown prior name: {model_name}")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-prior = Prior(**model_cfg).to(device)
+prior  = Prior(**model_cfg).to(device)
 
 opt = torch.optim.AdamW(prior.parameters(), lr=LR)
 
-# ---- train
+# ---- AMP setup ----
+use_amp = (device == "cuda")
+if use_amp:
+    from torch.amp import GradScaler, autocast
+    scaler = GradScaler("cuda")
+else:
+    scaler = None
+
+# ---- train ----
 for epoch in range(int(cfg["train"]["epochs"])):
     prior.train()
     for x, y in dl:
-        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)  # [B,64]
-        logits = prior(x)                         # [B,64,K_vocab]
-        loss = F.cross_entropy(logits.reshape(-1, K_vocab), y.reshape(-1))
-        opt.zero_grad(); loss.backward(); opt.step()
+        x = x.to(device, non_blocking=True)
+        y = y.to(device, non_blocking=True)
+
+        opt.zero_grad()
+
+        if use_amp:
+            with autocast("cuda", dtype=torch.float16):
+                logits = prior(x)
+                loss = F.cross_entropy(
+                    logits.reshape(-1, K_vocab),
+                    y.reshape(-1)
+                )
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
+        else:
+            logits = prior(x)
+            loss = F.cross_entropy(
+                logits.reshape(-1, K_vocab),
+                y.reshape(-1)
+            )
+            loss.backward()
+            opt.step()
+
+    # log last loss of epoch to file only
     log(f"Epoch {epoch:03d} | loss={loss.item():.6f}")
 
-# ---- save
+# ---- save checkpoint ----
 torch.save(prior.state_dict(), SAVE)
 log(f"Saved → {SAVE}")
 
