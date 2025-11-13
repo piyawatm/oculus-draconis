@@ -1,7 +1,7 @@
 import torch
 from torchvision.utils import save_image
 from models.vqvae import VQVAE
-from models.priors.gpt import GPTPrior
+from models.priors.bdh import BDHPrior
 import torch.nn.functional as F
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -33,8 +33,16 @@ bos_id = K_code       # 512
 vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
-prior = GPTPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
+prior = BDHPrior(
+    vocab_size=K_vocab,
+    d_model=256,
+    n_layer=6,
+    n_head=4,
+    block_size=T+1,               # 65
+    mlp_internal_dim_multiplier=16,  # <<< must match train_prior config
+    dropout=0.1,                     # or whatever you used
+).to(device).eval()
+prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
 
 # sampling
 B = 16
@@ -43,5 +51,5 @@ codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature
 codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
 
 imgs = vq.decode(codes).clamp(0, 1)
-save_image(imgs, "samples_gpt.png", nrow=4)
-print("Wrote samples_gpt.png")
+save_image(imgs, "samples_bdh.png", nrow=4)
+print("Wrote samples_bdh.png")
