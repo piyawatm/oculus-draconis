@@ -6,13 +6,13 @@ model:
   n_layer: 6
   n_head: 4
   block_size: 65
-  mlp_internal_dim_multiplier: 64   # controls latent N
+  mlp_internal_dim_multiplier: 128   # controls latent N
   dropout: 0.1
 
 
 train:
   epochs: 30
-  batch_size: 64
+  batch_size: 128
   lr: 0.0003
   clip_grad: 1.0
   seed: 42

@@ -3,6 +3,20 @@ import torch, torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from utils import set_seed
 import yaml
+import os
+import sys
+
+# ------------- logging setup (no terminal prints) -------------
+log_path = "logs/train_prior_log.txt"
+os.makedirs("logs", exist_ok=True)
+log_file = open(log_path, "w")
+
+def log(msg):
+    log_file.write(msg + "\n")
+    log_file.flush()
+
+# Redirect prints to nowhere
+sys.stdout = open(os.devnull, 'w')
 
 # ---- load config / seed
 cfg = yaml.safe_load(open("configs/prior_bdh.yaml"))
@@ -53,8 +67,10 @@ for epoch in range(int(cfg["train"]["epochs"])):
         logits = prior(x)                         # [B,64,K_vocab]
         loss = F.cross_entropy(logits.reshape(-1, K_vocab), y.reshape(-1))
         opt.zero_grad(); loss.backward(); opt.step()
-    print(f"Epoch {epoch:03d} | loss={loss.item():.4f}")
+    log(f"Epoch {epoch:03d} | loss={loss.item():.6f}")
 
 # ---- save
 torch.save(prior.state_dict(), SAVE)
-print(f"Saved → {SAVE}")
+log(f"Saved → {SAVE}")
+
+log_file.close()
