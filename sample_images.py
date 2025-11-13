@@ -3,8 +3,22 @@ from torchvision.utils import save_image
 from models.vqvae import VQVAE
 from models.priors.bdh import BDHPrior
 import torch.nn.functional as F
+import os
+import sys
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ------------- logging setup (no terminal prints) -------------
+log_path = "logs/sample_images_log.txt"
+os.makedirs("logs", exist_ok=True)
+log_file = open(log_path, "w")
+
+def log(msg: str):
+    log_file.write(msg + "\n")
+    log_file.flush()
+
+# Silence stdout
+sys.stdout = open(os.devnull, "w")
 
 def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
     """Autoregressive sampling that forbids BOS from being generated."""
@@ -52,4 +66,5 @@ codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
 
 imgs = vq.decode(codes).clamp(0, 1)
 save_image(imgs, "samples_bdh.png", nrow=4)
-print("Wrote samples_bdh.png")
+log("Wrote samples_bdh.png")
+log_file.close()

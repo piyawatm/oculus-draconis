@@ -7,6 +7,20 @@ from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
 from models.priors.bdh import BDHPrior  # or GPTPrior
 import torch.nn.functional as F
+import os
+import sys
+
+# ------------- logging setup (no terminal prints) -------------
+log_path = "logs/eval_metrics_log.txt"
+os.makedirs("logs", exist_ok=True)
+log_file = open(log_path, "w")
+
+def log(msg: str):
+    log_file.write(msg + "\n")
+    log_file.flush()
+
+# Silence stdout
+sys.stdout = open(os.devnull, "w")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
@@ -86,6 +100,7 @@ while seen < target:
     seen += b
 
 
-print("FID:", float(fid.compute()))
+log("FID:", float(fid.compute()))
 m, s = iscore.compute()
-print("IS:", float(m), "+/-", float(s))
+log("IS:", float(m), "+/-", float(s))
+log_file.close()
