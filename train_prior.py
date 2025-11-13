@@ -3,7 +3,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from utils import set_seed, save_checkpoint, count_parameters
 import yaml
-import argparse # Added for config file argument
+import argparse
+import math # <-- Import math
 
 # ---- config setup
 parser = argparse.ArgumentParser(description="Train a VQ-VAE Prior")
@@ -61,8 +62,6 @@ if is_maskgit:
 
     # Get mask token ID from the model instance
     mask_token_id = prior.mask_token_id
-    # Masking schedule (could be in config, hardcoded for simplicity)
-    mask_prob = 0.15 
 
 else:
     # Autoregressive models (BDH, GPT) need BOS-aware, shifted targets
@@ -94,21 +93,38 @@ for epoch in range(EPOCHS):
             x_true = batch[0].to(device, non_blocking=True) # [B, T]
             B, T = x_true.shape
             
-            # 1. Create mask: True = to be masked
-            mask = torch.rand(x_true.shape, device=device) < mask_prob
+            # --- DYNAMIC MASKING (Solution 2) ---
+            # 1. Sample a random ratio from a cosine schedule
+            #    This creates a distribution of ratios biased towards 0 (unmasked)
+            u = torch.rand(B, device=device) * (0.5 * math.pi) # [B]
+            mask_ratio = torch.cos(u) # [B]
             
-            # 2. Create masked input
+            # 2. Determine number of tokens to mask per batch item
+            n_to_mask = (mask_ratio * T).ceil().int() # [B]
+            
+            # 3. Get random indices to mask
+            #    `ranks` will be a tensor of [B, T] with values [0, T-1]
+            #    representing the random rank of each token.
+            shuffled_indices = torch.rand(B, T, device=device).argsort(dim=1)
+            ranks = shuffled_indices.argsort(dim=1)
+            
+            # 4. Create mask: True = to be masked
+            #    We mask if the rank is less than n_to_mask for that row.
+            mask = ranks < n_to_mask.unsqueeze(1) # [B, T] < [B, 1]
+            # --- End Dynamic Masking ---
+
+            # 5. Create masked input
             x_masked = x_true.clone()
             x_masked[mask] = mask_token_id
             
-            # 3. Create labels: -100 at unmasked positions
+            # 6. Create labels: -100 at unmasked positions
             labels = x_true.clone()
             labels[~mask] = -100 # ignore_index for cross_entropy
             
-            # 4. Forward pass
+            # 7. Forward pass
             logits = prior(x_masked) # [B, T, K_vocab]
             
-            # 5. Compute loss only on masked positions
+            # 8. Compute loss only on masked positions
             loss = F.cross_entropy(
                 logits.view(-1, K_vocab), # [B*T, K_vocab]
                 labels.view(-1),          # [B*T]

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from typing import Union
 
 from .base import ARPrior
 
@@ -117,8 +118,8 @@ class MaskGITPrior(ARPrior):
         idx: torch.LongTensor,
         max_new_tokens: int,
         temperature: float = 1.0,
-        sampling_top_k: int | None = None, # Renamed from top_k
-        eos_id: int | None = None, # Ignored by MaskGIT
+        sampling_top_k: Union[int, None] = None, # Renamed from top_k
+        eos_id: Union[int, None] = None, # Ignored by MaskGIT
         n_steps: int = 12, # Number of refinement steps
         schedule: str = 'cosine',
     ) -> torch.LongTensor:
@@ -153,7 +154,7 @@ class MaskGITPrior(ARPrior):
             logits = logits / max(1e-8, temperature)
             if sampling_top_k is not None:
                 v, _ = torch.topk(logits, min(sampling_top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = float("-inf")
+                logits[logits < v[..., -1].unsqueeze(-1)] = float("-inf")
             
             probs = F.softmax(logits, dim=-1) # [B, T, V]
             
@@ -176,7 +177,7 @@ class MaskGITPrior(ARPrior):
             else:
                 # Get target mask ratio for *next* step
                 mask_ratio_next = self._get_mask_ratio(t + 1, n_steps, schedule)
-                n_masked_target = (T * mask_ratio_next).floor().int() # [B]
+                n_masked_target = math.floor(T * mask_ratio_next) # [B]
                 
                 n_to_unmask = (n_masked_current - n_masked_target).int()
                 # Ensure we always unmask at least one token (to make progress)

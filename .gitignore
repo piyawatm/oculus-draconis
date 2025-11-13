@@ -15,3 +15,5 @@ __pycache__/
 # Ignore data and results
 /data/
 /results/
+# Ignore model checkpoints
+/checkpoints/

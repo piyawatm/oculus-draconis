@@ -20,6 +20,7 @@ train:
 
 sampling:
   # Parameters for the model.generate() method
+  temperature: 1.5    # Softmax temperature
   n_steps: 12          # Number of iterative refinement steps
   schedule: 'cosine'   # Masking schedule: 'cosine' or 'linear'
   sampling_top_k: 100  # k for top-k sampling at each refinement step
