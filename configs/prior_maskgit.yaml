@@ -1,0 +1,25 @@
+# configs/prior_maskgit.yaml
+# Config for the MaskGITPrior (non-autoregressive)
+
+model:
+  name: MaskGITPrior
+  vocab_size: 512      # VQ codebook size (K_code). The [MASK] token (ID 512) is added internally.
+  d_model: 256
+  n_layer: 6           # Number of transformer layers (matches your BDH config)
+  n_head: 4            # Number of attention heads (matches your BDH config)
+  block_size: 64       # T (e.g., 8x8 grid). No +1 for BOS token.
+  dropout: 0.1
+
+train:
+  epochs: 30
+  batch_size: 128
+  lr: 3e-4
+  clip_grad: 1.0
+  seed: 42
+  save_path: checkpoints/maskgit_prior.pt
+
+sampling:
+  # Parameters for the model.generate() method
+  n_steps: 12          # Number of iterative refinement steps
+  schedule: 'cosine'   # Masking schedule: 'cosine' or 'linear'
+  sampling_top_k: 100  # k for top-k sampling at each refinement step
