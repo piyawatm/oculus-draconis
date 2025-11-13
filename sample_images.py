@@ -1,47 +1,74 @@
 import torch
+import torch.nn.functional as F
 from torchvision.utils import save_image
 from models.vqvae import VQVAE
-from models.priors.gpt import GPTPrior
-import torch.nn.functional as F
+from models.priors.pixelcnn import PixelCNNPrior
 
+# ---------------- Setup ----------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
-    """Autoregressive sampling that forbids BOS from being generated."""
-    ids = bos  # [B,1]
-    for _ in range(steps):
-        idx_cond = ids[:, -getattr(prior, "block_size", ids.size(1)):]  # respect block_size if present
-        logits = prior(idx_cond)[:, -1, :] / max(1e-8, temperature)      # [B, V]
-        # forbid BOS token
-        logits[:, bos_id] = float("-inf")
-        if top_k is not None:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = float("-inf")
-        probs = F.softmax(logits, dim=-1)
-        next_id = torch.multinomial(probs, 1)                             # [B,1]
-        ids = torch.cat([ids, next_id], dim=1)
-    return ids[:, 1:]  # drop BOS
-
-# VQ-VAE specifics
 Hc, Wc = 8, 8
-T = Hc * Wc           # 64
-K_code = 512
-K_vocab = K_code + 1  # 513 with BOS
-bos_id = K_code       # 512
+T = Hc * Wc
 
-# load models
+K_code = 512
+K_vocab = K_code + 1   # 513 (includes BOS)
+B = 16                 # number of images to sample
+
+# ---------------- Load Models ----------------
 vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
-prior = GPTPrior(vocab_size=K_vocab, d_model=256, n_layer=6, n_head=4, block_size=T+1).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/gpt_prior.pt", map_location=device))
+prior = PixelCNNPrior(
+    vocab_size=K_vocab,
+    d_model=128,
+    n_layers=12,
+    block_size=T
+).to(device).eval()
 
-# sampling
-B = 16
-bos = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
-codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [B,64]
-codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
+prior.load_state_dict(torch.load("checkpoints/pixelcnn_prior.pt", map_location=device))
+
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+
+
+# ---------------- PixelCNN Sampling ----------------
+@torch.no_grad()
+def sample_pixelcnn(prior, side=8, temperature=1.0, batch_size=16):
+    """
+    Proper autoregressive 2D sampling for PixelCNN.
+    """
+    codes = torch.zeros(batch_size, side, side, dtype=torch.long, device=device)
+
+    for i in range(side):
+        for j in range(side):
+            # Flatten [B, H, W] → [B, T]
+            flat = codes.view(batch_size, -1)
+
+            # Clamp indices to valid vocab range
+            flat = flat.clamp(0, K_vocab - 1)
+
+            logits = prior(flat)                          # [B, 64, 513]
+            logits = logits.view(batch_size, side, side, K_vocab)
+
+            # Select logits for pixel (i, j)
+            probs = F.softmax(logits[:, i, j, :] / temperature, dim=-1)
+
+            # Sample next token
+            next_id = torch.multinomial(probs, 1).squeeze(-1)
+
+            # Clamp again to valid range
+            next_id = next_id.clamp(0, K_code - 1)
+
+            codes[:, i, j] = next_id
+
+    return codes
+
+
+# ---------------- Generate images ----------------
+codes = sample_pixelcnn(prior, side=Hc, temperature=1.0, batch_size=B)  # [B,8,8]
 
 imgs = vq.decode(codes).clamp(0, 1)
-save_image(imgs, "samples_gpt.png", nrow=4)
-print("Wrote samples_gpt.png")
+save_image(imgs, "samples_pixelcnn.png", nrow=4)
+
+print("✓ Wrote samples_pixelcnn.png")
+print("Sampled codes range:", codes.min().item(), "to", codes.max().item())
