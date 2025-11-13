@@ -6,7 +6,7 @@ import yaml
 import time
 
 # ---- load config / seed
-cfg = yaml.safe_load(open("configs/prior_bdh.yaml"))
+cfg = yaml.safe_load(open("configs/prior_pixelsnail.yaml"))
 set_seed(int(cfg["train"]["seed"]))
 
 K_vocab = int(cfg["model"]["vocab_size"])  # e.g., 513
@@ -38,6 +38,8 @@ if model_name == "BDHPrior":
     from models.priors.bdh import BDHPrior as Prior
 elif model_name == "GPTPrior":
     from models.priors.gpt import GPTPrior as Prior
+elif model_name == "PixelSNAILPrior":
+    from models.priors.pixelsnail import PixelSNAILPrior as Prior
 else:
     raise ValueError(f"Unknown prior name: {model_name}")
 
