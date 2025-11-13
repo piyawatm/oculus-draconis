@@ -5,7 +5,7 @@ from utils import set_seed
 import yaml
 
 # ---- load config / seed
-cfg = yaml.safe_load(open("configs/prior_gpt.yaml"))
+cfg = yaml.safe_load(open("configs/prior_pixelcnn.yaml"))
 set_seed(int(cfg["train"]["seed"]))
 
 K_vocab = int(cfg["model"]["vocab_size"])  # e.g., 513
