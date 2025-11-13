@@ -12,7 +12,7 @@ model:
   tie_embeddings: true      # share token embedding with output projection
 
 train:
-  epochs: 5
+  epochs: 30
   batch_size: 128
   lr: 3e-4
   clip_grad: 1.0

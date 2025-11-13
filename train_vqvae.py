@@ -19,7 +19,7 @@ print("Params:", count_parameters(model), "M")
 opt = optim.Adam(model.parameters(), lr=2e-4)
 total_training_time = 0
 epoch_times = []
-for epoch in range(5): 
+for epoch in range(50): 
     epoch_start_time = time.time()
     epoch_loss = 0
     epoch_recon = 0
