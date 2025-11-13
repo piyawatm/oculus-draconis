@@ -17,7 +17,7 @@ print("Params:", count_parameters(model), "M")
 
 opt = optim.Adam(model.parameters(), lr=2e-4)
 
-for epoch in range(50):
+for epoch in range(5):
     for x, _ in loader:
         x = x.to(device)
         x_hat, loss_dict, _ = model(x)

@@ -31,14 +31,18 @@ ds = TensorDataset(xb, yb)
 dl = DataLoader(ds, batch_size=BATCH, shuffle=True, num_workers=2, pin_memory=True)
 
 # ---- build prior by name
+# ---- build prior by name
 model_cfg = dict(cfg["model"])
-model_name = model_cfg.pop("name", "BDHPrior")
+model_name = model_cfg.pop("name", "PixelCNNPrior")
 if model_name == "BDHPrior":
     from models.priors.bdh import BDHPrior as Prior
 elif model_name == "GPTPrior":
     from models.priors.gpt import GPTPrior as Prior
+elif model_name == "PixelCNNPrior":
+    from models.priors.pixelcnn import PixelCNNPrior as Prior
 else:
     raise ValueError(f"Unknown prior name: {model_name}")
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 prior = Prior(**model_cfg).to(device)
