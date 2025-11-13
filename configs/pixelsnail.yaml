@@ -3,19 +3,16 @@
 
 model:
   name: PixelSNAILPrior
-  vocab_size: 513          # 512 codebook entries + 1 BOS token
-  hidden_channels: 256     # similar to d_model in BDH/GPT
-  n_res_blocks: 5          # number of residual blocks per layer
-  n_cond_channels: 0       # set >0 if using conditional inputs (e.g., class labels)
-  n_layers: 2              # hierarchical levels (e.g., top and bottom PixelSNAIL)
-  kernel_size: 5           # receptive field kernel (typical for PixelSNAIL)
-  block_size: 65           # sequence length (64 tokens + BOS)
-  dropout: 0.1             # dropout for regularization
-  use_causal_mask: true    # ensure autoregressive masking
-  tie_embeddings: true     # share token embedding with output projection
+  vocab_size: 513           # 512 codebook entries + 1 BOS token
+  d_model: 256              # embedding / hidden dimension
+  n_layer: 6                # number of PixelSNAIL blocks
+  block_size: 65            # sequence length (64 tokens + BOS)
+  n_residual: 2             # residual layers per block
+  dropout: 0.1              # dropout for regularization
+  tie_embeddings: true      # share token embedding with output projection
 
 train:
-  epochs: 30
+  epochs: 5
   batch_size: 128
   lr: 3e-4
   clip_grad: 1.0

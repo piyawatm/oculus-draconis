@@ -6,7 +6,7 @@ import yaml
 import time
 
 # ---- load config / seed
-cfg = yaml.safe_load(open("configs/prior_pixelsnail.yaml"))
+cfg = yaml.safe_load(open("configs/pixelsnail.yaml"))
 set_seed(int(cfg["train"]["seed"]))
 
 K_vocab = int(cfg["model"]["vocab_size"])  # e.g., 513
@@ -55,20 +55,23 @@ for epoch in range(int(cfg["train"]["epochs"])):
     epoch_start_time = time.time()
     prior.train()
     epoch_loss = 0
-    num_batches = 0 
+    num_batches = 0
+
     for x, y in dl:
-        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)  # [B,64]
-        logits = prior(x)                         # [B,64,K_vocab]
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        logits = prior(x)
         loss = F.cross_entropy(logits.reshape(-1, K_vocab), y.reshape(-1))
         opt.zero_grad(); loss.backward(); opt.step()
         epoch_loss += loss.item()
-        num_batches += 1 
-    total_training_time += epoch_time
-    epoch_times.append(epoch_time)
-    epoch_time = time.time() - epoch_start_time
-    total_training_time += epoch_time
-    avg_loss = epoch_loss / num_batches 
+        num_batches += 1
+
+    epoch_time = time.time() - epoch_start_time 
+    epoch_times.append(epoch_time)  
+    total_training_time += epoch_time           
+
+    avg_loss = epoch_loss / num_batches
     print(f"Epoch {epoch:03d} | loss={avg_loss:.4f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
+
 
 # ---- save
 torch.save(prior.state_dict(), SAVE)
