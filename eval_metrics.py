@@ -57,7 +57,7 @@ vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 prior = PixelSNAILPrior(
     vocab_size=K_vocab,
     d_model=256,
-    n_layer=6,
+    n_layer=12,
     block_size=T+1,
     n_residual=2,
     dropout=0.1,
@@ -108,19 +108,13 @@ print(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
 
 # ---- model stats ----
 print("\n--- Model Stats ---")
-vq_params = count_parameters(vq)
 prior_params = count_parameters(prior)
-print(f"VQVAE Parameters: {vq_params/1e6:.2f}M")
 print(f"PixelSNAIL Prior Parameters: {prior_params/1e6:.2f}M")
 
 if torch.cuda.is_available():
     sample_codes = torch.randint(0, K_code, (1, Hc, Wc), device=device)
-    vq_mem = measure_memory(vq.decode, sample_codes)
-
     bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
     prior_mem = measure_memory(prior, bos)
-
-    print(f"VQVAE Memory Footprint: {vq_mem:.1f} MB")
     print(f"PixelSNAIL Prior Memory Footprint: {prior_mem:.1f} MB")
 else:
     print("CUDA not available — skipping memory footprint measurement.")

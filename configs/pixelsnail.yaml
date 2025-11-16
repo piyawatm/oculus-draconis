@@ -5,14 +5,14 @@ model:
   name: PixelSNAILPrior
   vocab_size: 513           # 512 codebook entries + 1 BOS token
   d_model: 256              # embedding / hidden dimension
-  n_layer: 6                # number of PixelSNAIL blocks
+  n_layer: 12                # number of PixelSNAIL blocks
   block_size: 65            # sequence length (64 tokens + BOS)
   n_residual: 2             # residual layers per block
   dropout: 0.1              # dropout for regularization
   tie_embeddings: true      # share token embedding with output projection
 
 train:
-  epochs: 30
+  epochs: 5
   batch_size: 128
   lr: 3e-4
   clip_grad: 1.0
