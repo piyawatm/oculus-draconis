@@ -2,12 +2,12 @@ model:
   name: PixelCNNPrior
   vocab_size: 513   # K_code + 1 for BOS
   d_model: 128      # embedding / conv channels
-  n_layers: 12
+  n_layers: 15
   kernel_size: 3
   block_size: 64    # T (note: train_prior expects seq shape [N,64])
   dropout: 0.1
 train:
-  epochs: 30
+  epochs: 5
   batch_size: 128
   lr: 3e-4
   seed: 42

@@ -41,9 +41,10 @@ vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 prior = PixelCNNPrior(
     vocab_size=K_vocab,
     d_model=128,
-    n_layers=12,
+    n_layers=15,    # MUST MATCH YAML + training
     kernel_size=3,
-    block_size=T
+    block_size=T,
+    dropout=0.0
 ).to(device).eval()
 
 prior.load_state_dict(torch.load("checkpoints/pixelcnn_prior.pt", map_location=device))
