@@ -1,5 +1,4 @@
 # models/priors/pixelsnail.py
-# Faithful-ish PixelSNAIL prior for VQ-VAE token sequences (2D masked conv + attention)
 from __future__ import annotations
 import torch
 import torch.nn as nn
@@ -7,9 +6,7 @@ import torch.nn.functional as F
 from models.priors.base import ARPrior
 from typing import Optional
 
-# -------------------------
 # Utility layers
-# -------------------------
 class MaskedConv2d(nn.Conv2d):
     """
     2D masked convolution enforcing autoregressive raster-scan causality.
@@ -18,22 +15,21 @@ class MaskedConv2d(nn.Conv2d):
     def __init__(self, in_ch, out_ch, kernel_size, mask_type='B', stride=1, padding=0, bias=True):
         super().__init__(in_ch, out_ch, kernel_size, stride=stride, padding=padding, bias=bias)
         assert mask_type in ('A', 'B')
+        # create mask buffer of same shape as weight
         self.register_buffer('mask', self.weight.data.clone())
         self.mask.fill_(1)
         kh, kw = self.kernel_size
         cy, cx = kh // 2, kw // 2
 
-        # mask out positions that are not allowed (future in raster order)
         for i in range(kh):
             for j in range(kw):
                 if i > cy or (i == cy and j > cx):
                     self.mask[:, :, i, j] = 0
         if mask_type == 'A':
-            # in the center pixel, we must also mask out all input channels in 'A' type
+            
             self.mask[:, :, cy, cx] = 0
 
     def forward(self, x):
-        # apply mask to weights
         self.weight.data *= self.mask
         return super().forward(x)
 
@@ -92,29 +88,26 @@ class AttentionBlock2D(nn.Module):
         self.scale = key_dim ** -0.5
 
     def forward(self, x):
-        # x: [B, C, H, W]
         B, C, H, W = x.shape
         N = H * W
-        q = self.q_proj(x).reshape(B, self.n_heads, self.key_dim, N)  # [B, heads, kd, N]
+        q = self.q_proj(x).reshape(B, self.n_heads, self.key_dim, N)
         k = self.k_proj(x).reshape(B, self.n_heads, self.key_dim, N)
         v = self.v_proj(x).reshape(B, self.n_heads, self.val_dim, N)
 
         # transpose to [B, heads, N, dim]
-        q = q.permute(0, 1, 3, 2)  # [B, h, N, kd]
-        k = k.permute(0, 1, 3, 2)  # [B, h, N, kd]
-        v = v.permute(0, 1, 3, 2)  # [B, h, N, vd]
+        q = q.permute(0, 1, 3, 2)
+        k = k.permute(0, 1, 3, 2)
+        v = v.permute(0, 1, 3, 2)
 
-        # scaled dot-product with causal mask
-        attn_logits = torch.matmul(q, k.transpose(-2, -1)) * self.scale  # [B,h,N,N]
-        # causal mask: allow j <= i (so position i can attend to positions <= i)
+        attn_logits = torch.matmul(q, k.transpose(-2, -1)) * self.scale 
         mask = torch.tril(torch.ones(N, N, device=x.device)).unsqueeze(0).unsqueeze(0)  # [1,1,N,N]
         attn_logits = attn_logits.masked_fill(mask == 0, float("-inf"))
-        attn = torch.softmax(attn_logits, dim=-1)  # [B,h,N,N]
+        attn = torch.softmax(attn_logits, dim=-1)
 
-        out = torch.matmul(attn, v)  # [B,h,N,vd]
+        out = torch.matmul(attn, v)
         out = out.permute(0, 1, 3, 2).reshape(B, self.n_heads * self.val_dim, H, W)
         out = self.out(out)
-        return x + out  # residual
+        return x + out
 
 # -------------------------
 # PixelSNAIL block: stack of gated residuals and optional attention
@@ -138,7 +131,6 @@ class PixelSNAILBlock2D(nn.Module):
     def forward(self, x):
         for i, r in enumerate(self.res_blocks):
             x = r(x)
-            # if attention present and this is the designated position, apply it
             if self.attn is not None and ((i + 1) % self.attn_every == 0):
                 x = self.attn(x)
         return x
@@ -160,7 +152,7 @@ class PixelSNAILPrior(ARPrior):
         n_layer: int = 12,
         height: int = 8,
         width: int = 8,
-        block_size: int = 64, ## Not using this.
+        block_size: int = 64,  # accepted for compatibility
         n_residual: int = 4,
         kernel_size: int = 3,
         dropout: float = 0.0,
@@ -176,10 +168,9 @@ class PixelSNAILPrior(ARPrior):
         self.height = height
         self.width = width
         self.d_model = d_model
+        self.n_layer = n_layer
 
-        # embeddings
         self.token_emb = nn.Embedding(vocab_size, d_model)
-        # positional embedding: separate row & col embeddings summed (learned)
         self.row_emb = nn.Embedding(height, d_model)
         self.col_emb = nn.Embedding(width, d_model)
         self.drop = nn.Dropout(dropout)
@@ -200,12 +191,16 @@ class PixelSNAILPrior(ARPrior):
                 mask_type='B'
             )
             self.blocks.append(block)
+        # PixelSNAIL accumulates skip outputs from each block
+        self.skip_projs = nn.ModuleList([
+            nn.Conv2d(d_model, d_model, kernel_size=1)
+            for _ in range(n_layer)
+        ])
 
         self.ln_f = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
 
         if tie_embeddings:
-            # tie output logit weights to token embedding
             self.head.weight = self.token_emb.weight
 
     def forward(self, idx: torch.LongTensor) -> torch.Tensor:
@@ -214,23 +209,20 @@ class PixelSNAILPrior(ARPrior):
         Returns logits: [B, T, vocab_size]
         """
         B, T = idx.shape
-        # expect T <= H*W (excluding BOS). If BOS included in idx, user should pass tokens excluding BOS for forward
         assert T <= self.height * self.width, f"T={T} exceeds H*W={self.height * self.width}"
 
         # positional indices (row/col) for T positions in raster order
-        # compute row,col arrays of length T
         device = idx.device
         rows = torch.arange(self.height, device=device).unsqueeze(1).repeat(1, self.width).view(-1)[:T]  # [T]
         cols = torch.arange(self.width, device=device).repeat(self.height)[:T]  # [T]
 
         # token embedding => [B, T, D]
-        x = self.token_emb(idx)  # [B, T, D]
+        x = self.token_emb(idx)
         # add row/col embeddings
         x = x + self.row_emb(rows).unsqueeze(0) + self.col_emb(cols).unsqueeze(0)
         x = self.drop(x)
 
         # reshape to 2D: [B, D, H, W], but T may be < H*W (we assume full grid T==H*W for sampling/eval)
-        # fill remaining positions with zeros if T < H*W (not typical here)
         if T == self.height * self.width:
             x2d = x.transpose(1, 2).reshape(B, self.d_model, self.height, self.width)
         else:
@@ -242,11 +234,19 @@ class PixelSNAILPrior(ARPrior):
 
         # initial masked conv (B)
         x2d = self.input_conv(x2d)
-        # pass through blocks
-        for blk in self.blocks:
-            x2d = blk(x2d)
 
-        # back to [B, T, D]
+        accum = None
+        for blk, skip_proj in zip(self.blocks, self.skip_projs):
+            out = blk(x2d)
+            skip = skip_proj(out)
+
+            if accum is None:
+                accum = skip
+            else:
+                accum = accum + skip
+
+            x2d = x2d + accum
+
         x_flat = x2d.reshape(B, self.d_model, -1)[:, :, :T]  # [B, D, T]
         x_flat = x_flat.transpose(1, 2)  # [B, T, D]
 
@@ -256,5 +256,5 @@ class PixelSNAILPrior(ARPrior):
 
     @torch.no_grad()
     def generate(self, idx: torch.LongTensor, max_new_tokens: int, temperature: float = 1.0, top_k: int | None = None, eos_id: int | None = None):
-        # Keep the ARPrior.generate() behavior (handles iterative sampling)
+        
         return super().generate(idx, max_new_tokens, temperature, top_k, eos_id)
