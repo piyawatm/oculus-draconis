@@ -63,7 +63,7 @@ prior = BDHPrior(
     n_layer=6,                  # whatever you used in train_prior
     n_head=4,
     block_size=T+1,             # 65
-    mlp_internal_dim_multiplier=16,  # <<< match training
+    mlp_internal_dim_multiplier=128,  # <<< match training
     dropout=0.1,                # or your train-time value
 ).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
