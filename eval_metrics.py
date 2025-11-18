@@ -9,6 +9,7 @@ from models.priors.bdh import BDHPrior  # or GPTPrior
 import torch.nn.functional as F
 import os
 import sys
+from torch.amp import autocast
 
 # ------------- logging setup (no terminal prints) -------------
 log_path = "logs/eval_metrics_log.txt"
@@ -25,19 +26,40 @@ sys.stdout = open(os.devnull, "w")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
 
+@torch.no_grad()
 def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
-    ids = bos
+    """
+    Autoregressive generation:
+    - BOS is provided and never generated again.
+    - Uses AMP (float16) inside forward pass for memory savings.
+    """
+    device = bos.device
+    ids = bos  # [B, 1]
+
     for _ in range(steps):
-        idx_cond = ids[:, -getattr(prior, "block_size", ids.size(1)):]
-        logits = prior(idx_cond)[:, -1, :] / max(1e-8, temperature)
+        # respect block_size if model has one
+        block = getattr(prior, "block_size", ids.size(1))
+        idx_cond = ids[:, -block:]  # [B, <=block]
+
+        # AMP context for memory reduction
+        with autocast("cuda", dtype=torch.float16):
+            logits = prior(idx_cond)[:, -1, :]  # [B, vocab]
+            logits = logits / max(1e-8, temperature)
+
+        # forbid BOS from ever being re-generated
         logits[:, bos_id] = float("-inf")
+
+        # top-k filtering
         if top_k is not None:
             v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
             logits[logits < v[:, [-1]]] = float("-inf")
+
         probs = F.softmax(logits, dim=-1)
-        next_id = torch.multinomial(probs, 1)
+        next_id = torch.multinomial(probs, 1)  # [B,1]
+
         ids = torch.cat([ids, next_id], dim=1)
-    return ids[:, 1:]
+
+    return ids[:, 1:]  # drop BOS column
 
 # ------------- helpers -------------
 def to_u8(x: torch.Tensor) -> torch.Tensor:
@@ -90,12 +112,22 @@ bos_id = K_code
 while seen < target:
     b = min(B, target - seen)
     bos = torch.full((b, 1), bos_id, dtype=torch.long, device=device)
-    codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [b,64]
-    codes = codes_seq.view(b, Hc, Wc)
-    imgs = vq.decode(codes).clamp(0, 1)
+
+    with torch.no_grad(), autocast("cuda", dtype=torch.float16):
+        codes_seq = generate_without_bos(
+            prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50
+        )  # [b,64]
+
+        codes = codes_seq.view(b, Hc, Wc)
+        imgs = vq.decode(codes).clamp(0, 1)
+
     imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
     fid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
+
+    # free intermediates
+    del codes_seq, codes, imgs, imgs_u8
+    torch.cuda.empty_cache()
 
     seen += b
 
