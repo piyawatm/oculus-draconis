@@ -7,7 +7,7 @@ model:
   block_size: 64    # T (note: train_prior expects seq shape [N,64])
   dropout: 0.1
 train:
-  epochs: 5
+  epochs: 30
   batch_size: 128
   lr: 3e-4
   seed: 42

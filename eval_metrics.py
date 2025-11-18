@@ -1,8 +1,9 @@
-# eval_metrics.py (PixelCNN version)
+# eval_metrics.py (PixelCNN version with FID, IS, KID + model stats)
 
 import torch
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.inception import InceptionScore
+from torchmetrics.image.kid import KernelInceptionDistance
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -18,11 +19,25 @@ Hc, Wc = 8, 8
 T = Hc * Wc      # 64
 K_code = 512
 K_vocab = K_code + 1   # 513 with BOS
+ENABLE_KID = True      # toggle KID on/off
 
 # ---------------- helpers ----------------
 def to_u8(x: torch.Tensor) -> torch.Tensor:
     """float in [0,1] → uint8 in [0,255]"""
     return (x.clamp(0, 1) * 255.0).to(torch.uint8)
+
+def count_parameters(model) -> int:
+    """Number of trainable parameters."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def measure_memory(fn, *args, **kwargs) -> float:
+    """Peak CUDA memory (MB) for a single forward pass of fn(*args, **kwargs)."""
+    if not torch.cuda.is_available():
+        return 0.0
+    torch.cuda.reset_peak_memory_stats()
+    with torch.no_grad():
+        _ = fn(*args, **kwargs)
+    return torch.cuda.max_memory_allocated() / (1024 ** 2)
 
 
 # ---------------- CIFAR10 real dataset ----------------
@@ -41,7 +56,7 @@ vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 prior = PixelCNNPrior(
     vocab_size=K_vocab,
     d_model=128,
-    n_layers=15,    # MUST MATCH YAML + training
+    n_layers=15,    # MUST MATCH training / YAML
     kernel_size=3,
     block_size=T,
     dropout=0.0
@@ -78,10 +93,14 @@ def sample_pixelcnn(prior, side=8, temperature=1.0, batch_size=64):
 # ---------------- metrics ----------------
 fid = FrechetInceptionDistance(feature=2048).to(device)
 iscore = InceptionScore().to(device)
+kid = KernelInceptionDistance(subset_size=50).to(device) if ENABLE_KID else None
 
 # real images → uint8
 for x, _ in real_loader:
-    fid.update(to_u8(x).to(device, non_blocking=True), real=True)
+    x_u8 = to_u8(x).to(device, non_blocking=True)
+    fid.update(x_u8, real=True)
+    if ENABLE_KID:
+        kid.update(x_u8, real=True)
 
 # generate ~10k fake images
 target = 10000
@@ -96,17 +115,38 @@ while seen < target:
     # 2) decode using VQ-VAE
     imgs = vq.decode(codes).clamp(0, 1)
 
-    # 3) convert to uint8 for FID/IS
+    # 3) convert to uint8 for FID/IS/KID
     imgs_u8 = to_u8(imgs).to(device)
 
     fid.update(imgs_u8, real=False)
     iscore.update(imgs_u8)
+    if ENABLE_KID:
+        kid.update(imgs_u8, real=False)
 
     seen += b
     print(f"Generated {seen}/{target}", end="\r")
 
 
 # ---------------- results ----------------
-print("\n\nFID:", float(fid.compute()))
+print("\n\n--- Evaluation Metrics ---")
+print(f"FID: {float(fid.compute()):.3f}")
+
+if ENABLE_KID:
+    kid_mean, kid_std = kid.compute()
+    print(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
+
 m, s = iscore.compute()
-print("IS:", float(m), "+/-", float(s))
+print(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
+
+# ---------------- model stats ----------------
+print("\n--- Model Stats ---")
+prior_params = count_parameters(prior)
+print(f"PixelCNN Prior Parameters: {prior_params / 1e6:.2f}M")
+
+if torch.cuda.is_available():
+    # measure one forward pass of the prior on a dummy [1, T] sequence
+    sample_idx = torch.randint(0, K_vocab, (1, T), device=device)
+    prior_mem = measure_memory(prior, sample_idx)
+    print(f"PixelCNN Prior Memory Footprint (1 forward): {prior_mem:.1f} MB")
+else:
+    print("CUDA not available — skipping memory footprint measurement.")
