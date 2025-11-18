@@ -132,7 +132,7 @@ while seen < target:
     seen += b
 
 
-log("FID:", float(fid.compute()))
+log(f"FID: {float(fid.compute())}")
 m, s = iscore.compute()
-log("IS:", float(m), "+/-", float(s))
+log(f"IS:, {float(m), "+/-", float(s)}")
 log_file.close()
