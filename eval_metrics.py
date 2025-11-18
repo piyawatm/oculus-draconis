@@ -134,5 +134,5 @@ while seen < target:
 
 log(f"FID: {float(fid.compute())}")
 m, s = iscore.compute()
-log(f"IS:, {float(m), "+/-", float(s)}")
+log(f"IS: {float(m)} +/- {float(s)}")
 log_file.close()
