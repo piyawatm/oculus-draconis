@@ -2,6 +2,7 @@
 import torch
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.inception import InceptionScore
+from torchmetrics.image.kid import KernelInceptionDistance
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
@@ -25,6 +26,15 @@ sys.stdout = open(os.devnull, "w")
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+def measure_memory(fn, *args, **kwargs):
+    torch.cuda.reset_peak_memory_stats()
+    with torch.no_grad():
+        _ = fn(*args, **kwargs)
+    return torch.cuda.max_memory_allocated() / (1024**2)
 
 @torch.no_grad()
 def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
@@ -93,6 +103,7 @@ prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device
 # ------------- metrics -------------
 fid = FrechetInceptionDistance(feature=2048).to(device)
 iscore = InceptionScore().to(device)
+kid = KernelInceptionDistance(subset_size=50).to(device)
 
 # real features (uint8)
 for x, _ in real_loader:
@@ -131,8 +142,28 @@ while seen < target:
 
     seen += b
 
+# ---- results ----
+log("\n--- Evaluation Metrics ---")
 
-log(f"FID: {float(fid.compute())}")
+log(f"FID: {float(fid.compute()):.3f}")
+
+kid_mean, kid_std = kid.compute()
+log(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
+
 m, s = iscore.compute()
-log(f"IS: {float(m)} +/- {float(s)}")
+log(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
+
+# ---- model stats ----
+log("\n--- Model Stats ---")
+prior_params = count_parameters(prior)
+log(f"BDH Prior Parameters: {prior_params/1e6:.2f}M")
+
+if torch.cuda.is_available():
+    sample_codes = torch.randint(0, K_code, (1, Hc, Wc), device=device)
+    bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
+    prior_mem = measure_memory(prior, bos)
+    log(f"BDH Prior Memory Footprint: {prior_mem:.1f} MB")
+else:
+    log("CUDA not available — skipping memory footprint measurement.")
+
 log_file.close()
