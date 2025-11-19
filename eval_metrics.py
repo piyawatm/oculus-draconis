@@ -109,6 +109,7 @@ kid = KernelInceptionDistance(subset_size=50).to(device)
 for x, _ in real_loader:
     x_u8 = to_u8(x).to(device, non_blocking=True)  # uint8 NCHW
     fid.update(x_u8, real=True)
+    kid.update(x_u8, real=True)
 
 # generate at least ~10k images
 target = 10000
@@ -135,6 +136,7 @@ while seen < target:
     imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
     fid.update(imgs_u8.to(device), real=False)
     iscore.update(imgs_u8.to(device))
+    kid.update(imgs_u8, real=False)
 
     # free intermediates
     del codes_seq, codes, imgs, imgs_u8
