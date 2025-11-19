@@ -8,7 +8,7 @@ model:
   n_layer: 12                # number of PixelSNAIL blocks
   block_size: 65            # sequence length (64 tokens + BOS)
   n_residual: 2             # residual layers per block
-  dropout: 0.1              # dropout for regularization
+  dropout: 0.5              # dropout for regularization
   tie_embeddings: true      # share token embedding with output projection
 
 train:
