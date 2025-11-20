@@ -12,7 +12,7 @@ model:
 
 train:
   epochs: 30
-  batch_size: 256
+  batch_size: 128
   lr: 0.0003
   clip_grad: 1.0
   seed: 42
