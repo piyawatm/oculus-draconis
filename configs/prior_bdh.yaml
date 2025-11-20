@@ -8,6 +8,9 @@ model:
   block_size: 65
   mlp_internal_dim_multiplier: 128   # controls latent N
   dropout: 0.1
+  image_height: 8
+  image_width: 8
+  locality_radius: 2
 
 
 train:
