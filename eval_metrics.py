@@ -91,11 +91,11 @@ Hc, Wc = 8, 8
 T = Hc * Wc
 prior = BDHPrior(
     vocab_size=K_vocab,         # 513
-    d_model=256,
-    n_layer=6,                  # whatever you used in train_prior
-    n_head=4,
+    d_model=512,
+    n_layer=16,                  # whatever you used in train_prior
+    n_head=8,
     block_size=T+1,             # 65
-    mlp_internal_dim_multiplier=128,  # <<< match training
+    mlp_internal_dim_multiplier=16,  # <<< match training
     dropout=0.1,                # or your train-time value
 ).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))

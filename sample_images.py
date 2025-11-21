@@ -49,11 +49,11 @@ vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
 prior = BDHPrior(
     vocab_size=K_vocab,
-    d_model=256,
-    n_layer=6,
-    n_head=4,
+    d_model=512,
+    n_layer=16,
+    n_head=8,
     block_size=T+1,               # 65
-    mlp_internal_dim_multiplier=128,  # <<< must match train_prior config
+    mlp_internal_dim_multiplier=16,  # <<< must match train_prior config
     dropout=0.1,                     # or whatever you used
 ).to(device).eval()
 prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
