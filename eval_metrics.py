@@ -1,7 +1,7 @@
 import torch
 from torchmetrics.image.fid import FrechetInceptionDistance
-from torchmetrics.image.kid import KernelInceptionDistance
 from torchmetrics.image.inception import InceptionScore
+from torchmetrics.image.kid import KernelInceptionDistance  # <-- Added Import
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 from models.vqvae import VQVAE
@@ -101,14 +101,14 @@ print(f"Loaded {model_name} with {count_parameters(prior):.2f}M parameters.")
 
 # ---- init metrics ----
 fid = FrechetInceptionDistance(feature=2048).to(device)
-kid = KernelInceptionDistance(subset_size=50).to(device)
 iscore = InceptionScore().to(device)
+kid = KernelInceptionDistance(subset_size=50).to(device) # <-- Init KID
 
 print("Calculating features for real images...")
 for x, _ in tqdm(real_loader):
     x_u8 = to_u8(x).to(device, non_blocking=True) # uint8 NCHW
     fid.update(x_u8, real=True)
-    kid.update(x_u8, real=True)
+    kid.update(x_u8, real=True) # <-- Update KID real
 
 # ---- generation loop ----
 print(f"Generating {target} fake images...")
@@ -143,8 +143,8 @@ with torch.no_grad():
         imgs_u8 = to_u8(imgs_float)   # [b, 3, 32, 32] (uint8)
 
         fid.update(imgs_u8, real=False)
-        kid.update(imgs_u8, real=False)
         iscore.update(imgs_u8)
+        kid.update(imgs_u8, real=False) # <-- Update KID fake
 
         seen += b
         print(f"\rGenerated {seen}/{target} images...", end="")
@@ -155,7 +155,7 @@ print("\nDone generating.")
 print("Calculating metrics...")
 fid_score = float(fid.compute())
 is_mean, is_std = iscore.compute()
-kid_score = float(kid.compute())
+kid_mean, kid_std = kid.compute() # <-- Correctly unpack tuple
 
 print("-" * 30)
 print(f"Model: {model_name}")
@@ -163,6 +163,6 @@ print(f"Config: {args.config}")
 print(f"Total Samples: {target}")
 print("-" * 30)
 print(f"FID: {fid_score:.4f}")
-print(f"KID: {kid_score:.4f}")
 print(f"IS:  {float(is_mean):.4f} +/- {float(is_std):.4f}")
+print(f"KID: {float(kid_mean):.4f} +/- {float(kid_std):.4f}") # <-- Print both mean and std
 print("-" * 30)

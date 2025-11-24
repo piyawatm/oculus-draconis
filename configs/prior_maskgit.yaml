@@ -6,7 +6,7 @@ model:
   vocab_size: 512      # VQ codebook size (K_code). The [MASK] token (ID 512) is added internally.
   d_model: 1024        # Model dimension
   n_layer: 24           # Number of transformer layers (matches your BDH config)
-  n_head: 8            # Number of attention heads (matches your BDH config)
+  n_head: 16            # Number of attention heads (matches your BDH config)
   block_size: 64       # T (e.g., 8x8 grid). No +1 for BOS token.
   dropout: 0.1
 
