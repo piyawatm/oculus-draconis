@@ -27,7 +27,7 @@ logger.log("Params:", count_parameters(model), "M")
 opt = optim.Adam(model.parameters(), lr=3e-4)
 scheduler = CosineAnnealingLR(opt, T_max=100)  # 100 epochs
 
-epochs = 100
+epochs = 11
 best_loss = float("inf")
 best_state = None
 
