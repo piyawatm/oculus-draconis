@@ -11,18 +11,11 @@ import torch.nn.functional as F
 import os
 import sys
 from torch.amp import autocast
+from utils import Logger
 
-# ------------- logging setup (no terminal prints) -------------
 log_path = "logs/eval_metrics_log.txt"
-os.makedirs("logs", exist_ok=True)
-log_file = open(log_path, "w")
 
-def log(msg: str):
-    log_file.write(msg + "\n")
-    log_file.flush()
-
-# Silence stdout
-sys.stdout = open(os.devnull, "w")
+logger = Logger(log_path)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 B, T, Hc, Wc, K = 64, 64, 8, 8, 512
@@ -145,27 +138,27 @@ while seen < target:
     seen += b
 
 # ---- results ----
-log("\n--- Evaluation Metrics ---")
+logger.log("\n--- Evaluation Metrics ---")
 
-log(f"FID: {float(fid.compute()):.3f}")
+logger.log(f"FID: {float(fid.compute()):.3f}")
 
 kid_mean, kid_std = kid.compute()
-log(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
+logger.log(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
 
 m, s = iscore.compute()
-log(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
+logger.log(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
 
 # ---- model stats ----
-log("\n--- Model Stats ---")
+logger.log("\n--- Model Stats ---")
 prior_params = count_parameters(prior)
-log(f"BDH Prior Parameters: {prior_params/1e6:.2f}M")
+logger.log(f"BDH Prior Parameters: {prior_params/1e6:.2f}M")
 
 if torch.cuda.is_available():
     sample_codes = torch.randint(0, K_code, (1, Hc, Wc), device=device)
     bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
     prior_mem = measure_memory(prior, bos)
-    log(f"BDH Prior Memory Footprint: {prior_mem:.1f} MB")
+    logger.log(f"BDH Prior Memory Footprint: {prior_mem:.1f} MB")
 else:
-    log("CUDA not available — skipping memory footprint measurement.")
+    logger.log("CUDA not available — skipping memory footprint measurement.")
 
-log_file.close()
+logger.close()

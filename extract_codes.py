@@ -19,6 +19,6 @@ def dump(split):
     torch.save({"grid": out, "seq": out_flat}, f"data/codes/cifar10_{split}.pt")
 
 vq = VQVAE(codebook_size=512, embed_dim=256, downsample_factor=4).cuda().eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae.pt"))
+vq.load_state_dict(torch.load("checkpoints/vqvae_best.pt"))
 dump("train"); dump("test")
 print("Extracted and saved VQ-VAE codes.")

@@ -4,18 +4,14 @@ import sys
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
-from utils import set_seed
+from utils import set_seed, Logger
 import yaml
 import time
 
 # ------------- logging setup (no terminal prints) -------------
 log_path = "logs/train_prior_log.txt"
-os.makedirs("logs", exist_ok=True)
-log_file = open(log_path, "w")
 
-def log(msg: str):
-    log_file.write(msg + "\n")
-    log_file.flush()
+logger  = Logger(log_path)
 
 # Silence stdout
 sys.stdout = open(os.devnull, "w")
@@ -112,14 +108,14 @@ for epoch in range(int(cfg["train"]["epochs"])):
     avg_loss = epoch_loss / num_batches
 
     # log last loss of epoch to file only
-    log(f"Epoch {epoch:03d} | loss={loss.item():.6f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
+    logger.log(f"Epoch {epoch:03d} | loss={loss.item():.6f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
 
 # ---- save checkpoint ----
 torch.save(prior.state_dict(), SAVE)
-log(f"Saved → {SAVE}")
+logger.log(f"Saved → {SAVE}")
 
 avg_epoch_time = sum(epoch_times) / len(epoch_times)
-log(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")
-log(f"Average epoch time: {avg_epoch_time:.2f} seconds")
+logger.log(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")
+logger.log(f"Average epoch time: {avg_epoch_time:.2f} seconds")
 
-log_file.close()
+logger.close()

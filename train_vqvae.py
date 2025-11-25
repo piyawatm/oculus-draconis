@@ -75,3 +75,4 @@ if best_state is not None:
 # save final model (last epoch weights)
 save_checkpoint(model, "checkpoints/vqvae.pt")
 logger.log("Saved final VQVAE checkpoint -> checkpoints/vqvae.pt")
+logger.close()
