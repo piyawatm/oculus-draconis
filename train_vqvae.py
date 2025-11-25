@@ -22,7 +22,7 @@ loader = DataLoader(train, batch_size=128, shuffle=True, num_workers=4, pin_memo
 
 # Match updated VQVAE defaults (192 channels, EMA VQ)
 model = VQVAE(codebook_size=512, embed_dim=256, downsample_factor=4).to(device)
-logger.log("Params:", count_parameters(model), "M")
+logger.log(f"Params:{count_parameters(model)}M")
 
 opt = optim.Adam(model.parameters(), lr=3e-4)
 scheduler = CosineAnnealingLR(opt, T_max=100)  # 100 epochs
