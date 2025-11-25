@@ -35,7 +35,8 @@ def load_checkpoint(model, path: str, device="cuda"):
 class Logger:
     """Tiny text logger; writes both to stdout and file."""
     def __init__(self, path):
-        self.f = open(path, "a")
+        os.makedirs("logs", exist_ok=True)
+        self.f = open(path, "w")
     def log(self, msg):
         print(msg)
         self.f.write(msg + "\n")
