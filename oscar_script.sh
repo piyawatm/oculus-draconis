@@ -10,7 +10,7 @@
 module load cuda
 
 # Run program
-python train_vqvae.py
+# python train_vqvae.py
 python extract_codes.py
 python train_prior.py
 python sample_images.py
