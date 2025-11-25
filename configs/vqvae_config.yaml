@@ -1,4 +1,5 @@
 # Training settings for VQ-VAE stage
+
 data:
   dataset: cifar10
   root: ./data
@@ -7,13 +8,16 @@ data:
   num_workers: 4
 
 model:
-  codebook_size: 512
-  embed_dim: 256
-  downsample_factor: 4
-  beta: 0.25
+  codebook_size: 512        # keep same for now
+  embed_dim: 256            # keep same for now
+  downsample_factor: 4      # 32x32 -> 8x8
+  beta: 0.25                # commitment weight
+  encoder_channels: 192     # NEW: matches updated vqvae.py default
+  decoder_channels: 192     # NEW: matches updated vqvae.py default
 
 train:
-  epochs: 50
-  lr: 2e-4
+  epochs: 100               # was 50; let it fully converge
+  lr: 3e-4                  # was 2e-4; a bit more aggressive with cosine schedule
   seed: 42
   save_path: checkpoints/vqvae.pt
+  log_path: logs/vqvae_train_log.txt   # optional if you want logging to file
