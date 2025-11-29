@@ -1,8 +1,8 @@
 
 --- Evaluation Metrics ---
-FID: 163.488
-KID: 0.198 +/- 0.015
-Inception Score: 2.438 +/- 0.035
+FID: 189.893
+KID: 0.225 +/- 0.014
+Inception Score: 2.045 +/- 0.046
 
 --- Model Stats ---
 BDH Prior Parameters: 13.11M

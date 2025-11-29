@@ -6,17 +6,21 @@ model:
   n_layer: 16
   n_head: 8
   block_size: 65
-  mlp_internal_dim_multiplier: 16   # controls latent N
+  mlp_internal_dim_multiplier: 16
   dropout: 0.1
   image_height: 8
   image_width: 8
   locality_radius: 3
-
+  use_softmax_attn: true     # NEW: Vision-BDH v2-style softmax in attention
 
 train:
-  epochs: 30
+  epochs: 30                 # or 30 with best-checkpoint logic
   batch_size: 128
-  lr: 0.0003
+  lr: 0.0001                 # I’d reduce from 0.0003 for stability
   clip_grad: 1.0
   seed: 42
   save_path: checkpoints/bdh_prior.pt
+  # optionally also add:
+  # weight_decay: 0.01
+  # label_smoothing: 0.1
+  # schedule: cosine

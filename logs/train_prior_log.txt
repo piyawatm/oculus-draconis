@@ -1,33 +1,33 @@
-Epoch 000 | loss=5.484342 | time=338.03s | total=5.6min
-Epoch 001 | loss=5.514325 | time=337.60s | total=11.3min
-Epoch 002 | loss=5.522975 | time=337.25s | total=16.9min
-Epoch 003 | loss=5.493128 | time=337.57s | total=22.5min
-Epoch 004 | loss=5.443301 | time=337.70s | total=28.1min
-Epoch 005 | loss=5.336101 | time=338.05s | total=33.8min
-Epoch 006 | loss=5.345777 | time=338.13s | total=39.4min
-Epoch 007 | loss=5.075034 | time=338.25s | total=45.0min
-Epoch 008 | loss=5.065985 | time=338.16s | total=50.7min
-Epoch 009 | loss=5.006410 | time=338.12s | total=56.3min
-Epoch 010 | loss=4.841897 | time=338.18s | total=62.0min
-Epoch 011 | loss=4.793519 | time=338.23s | total=67.6min
-Epoch 012 | loss=4.730441 | time=338.24s | total=73.2min
-Epoch 013 | loss=4.573659 | time=338.24s | total=78.9min
-Epoch 014 | loss=4.238817 | time=338.32s | total=84.5min
-Epoch 015 | loss=3.781253 | time=338.31s | total=90.1min
-Epoch 016 | loss=3.434700 | time=338.24s | total=95.8min
-Epoch 017 | loss=3.405198 | time=338.27s | total=101.4min
-Epoch 018 | loss=3.248248 | time=338.23s | total=107.1min
-Epoch 019 | loss=3.147540 | time=338.24s | total=112.7min
-Epoch 020 | loss=2.999032 | time=338.28s | total=118.3min
-Epoch 021 | loss=2.978341 | time=338.32s | total=124.0min
-Epoch 022 | loss=2.909523 | time=338.30s | total=129.6min
-Epoch 023 | loss=2.690677 | time=338.36s | total=135.2min
-Epoch 024 | loss=2.532565 | time=338.33s | total=140.9min
-Epoch 025 | loss=1.998777 | time=338.34s | total=146.5min
-Epoch 026 | loss=1.320644 | time=338.34s | total=152.2min
-Epoch 027 | loss=0.885090 | time=338.29s | total=157.8min
-Epoch 028 | loss=0.696866 | time=338.23s | total=163.4min
-Epoch 029 | loss=0.517953 | time=338.19s | total=169.1min
+Epoch 000 | loss=5.485174 | time=336.80s | total=5.6min
+Epoch 001 | loss=5.510459 | time=336.76s | total=11.2min
+Epoch 002 | loss=5.379355 | time=336.92s | total=16.8min
+Epoch 003 | loss=5.197907 | time=337.05s | total=22.5min
+Epoch 004 | loss=5.152595 | time=337.09s | total=28.1min
+Epoch 005 | loss=5.033363 | time=337.18s | total=33.7min
+Epoch 006 | loss=5.085711 | time=337.12s | total=39.3min
+Epoch 007 | loss=4.783830 | time=336.91s | total=44.9min
+Epoch 008 | loss=4.829133 | time=337.27s | total=50.6min
+Epoch 009 | loss=4.796544 | time=337.35s | total=56.2min
+Epoch 010 | loss=4.628694 | time=337.40s | total=61.8min
+Epoch 011 | loss=4.628770 | time=337.42s | total=67.4min
+Epoch 012 | loss=4.600464 | time=337.45s | total=73.0min
+Epoch 013 | loss=4.525643 | time=337.47s | total=78.7min
+Epoch 014 | loss=4.429947 | time=337.50s | total=84.3min
+Epoch 015 | loss=4.091774 | time=337.51s | total=89.9min
+Epoch 016 | loss=3.825394 | time=337.37s | total=95.5min
+Epoch 017 | loss=3.608349 | time=337.42s | total=101.2min
+Epoch 018 | loss=3.348299 | time=337.32s | total=106.8min
+Epoch 019 | loss=3.174817 | time=337.28s | total=112.4min
+Epoch 020 | loss=3.011035 | time=337.25s | total=118.0min
+Epoch 021 | loss=2.953964 | time=337.33s | total=123.7min
+Epoch 022 | loss=2.907297 | time=337.34s | total=129.3min
+Epoch 023 | loss=2.672208 | time=337.35s | total=134.9min
+Epoch 024 | loss=2.700916 | time=337.31s | total=140.5min
+Epoch 025 | loss=2.643447 | time=337.30s | total=146.1min
+Epoch 026 | loss=2.613417 | time=337.30s | total=151.8min
+Epoch 027 | loss=2.533119 | time=337.33s | total=157.4min
+Epoch 028 | loss=2.512053 | time=337.22s | total=163.0min
+Epoch 029 | loss=2.463216 | time=337.33s | total=168.6min
 Saved → checkpoints/bdh_prior.pt
-Total training time: 169.07 minutes (2.82 hours)
-Average epoch time: 338.15 seconds
+Total training time: 168.63 minutes (2.81 hours)
+Average epoch time: 337.25 seconds
