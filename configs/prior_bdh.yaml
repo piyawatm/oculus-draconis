@@ -2,11 +2,11 @@
 model:
   name: BDHPrior
   vocab_size: 513
-  d_model: 512
-  n_layer: 16
-  n_head: 8
+  d_model: 256
+  n_layer: 6
+  n_head: 4
   block_size: 65
-  mlp_internal_dim_multiplier: 16
+  mlp_internal_dim_multiplier: 128
   dropout: 0.1
   image_height: 8
   image_width: 8

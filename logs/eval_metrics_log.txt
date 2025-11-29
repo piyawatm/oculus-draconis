@@ -1,9 +1,9 @@
 
 --- Evaluation Metrics ---
-FID: 189.893
-KID: 0.225 +/- 0.014
-Inception Score: 2.045 +/- 0.046
+FID: 110.936
+KID: 0.124 +/- 0.014
+Inception Score: 3.458 +/- 0.071
 
 --- Model Stats ---
-BDH Prior Parameters: 13.11M
-BDH Prior Memory Footprint: 690.6 MB
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 754.1 MB
