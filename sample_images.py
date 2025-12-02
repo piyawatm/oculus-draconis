@@ -5,20 +5,26 @@ from models.priors.bdh import BDHPrior
 import torch.nn.functional as F
 import os
 import sys
+import glob
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 # ------------- logging setup (no terminal prints) -------------
 log_path = "logs/sample_images_log.txt"
 os.makedirs("logs", exist_ok=True)
 log_file = open(log_path, "w")
 
+
 def log(msg: str):
     log_file.write(msg + "\n")
     log_file.flush()
 
+
 # Silence stdout
 sys.stdout = open(os.devnull, "w")
+
 
 def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
     """Autoregressive sampling that forbids BOS from being generated."""
@@ -36,6 +42,7 @@ def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None)
         ids = torch.cat([ids, next_id], dim=1)
     return ids[:, 1:]  # drop BOS
 
+
 # VQ-VAE specifics
 Hc, Wc = 8, 8
 T = Hc * Wc           # 64
@@ -43,28 +50,47 @@ K_code = 512
 K_vocab = K_code + 1  # 513 with BOS
 bos_id = K_code       # 512
 
-# load models
+
+# load VQ-VAE (shared across all checkpoints)
 vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
 vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
 
-prior = BDHPrior(
-    vocab_size=K_vocab,
-    d_model=256,
-    n_layer=6,
-    n_head=4,
-    block_size=T+1,               # 65
-    mlp_internal_dim_multiplier=128,  # <<< must match train_prior config
-    dropout=0.1,                     # or whatever you used
-).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/bdh_prior.pt", map_location=device))
 
-# sampling
-B = 16
-bos = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
-codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [B,64]
-codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
+# Find all checkpoint files
+checkpoint_pattern = "checkpoints/bdh_prior*.pt"
+checkpoint_files = sorted(glob.glob(checkpoint_pattern))
 
-imgs = vq.decode(codes).clamp(0, 1)
-save_image(imgs, "samples_bdh.png", nrow=4)
-log("Wrote samples_bdh.png")
+
+# Loop through each checkpoint
+for ckpt_path in checkpoint_files:
+    # Extract checkpoint name for output filename
+    ckpt_name = os.path.splitext(os.path.basename(ckpt_path))[0]
+    
+    log(f"\n{'='*50}")
+    log(f"Sampling from: {ckpt_path}")
+    log(f"{'='*50}")
+    
+    prior = BDHPrior(
+        vocab_size=K_vocab,
+        d_model=384,
+        n_layer=9,
+        n_head=6,
+        block_size=T+1,               # 65
+        mlp_internal_dim_multiplier=96,  # <<< must match train_prior config
+        dropout=0.1,                     # or whatever you used
+    ).to(device).eval()
+    prior.load_state_dict(torch.load(ckpt_path, map_location=device))
+
+    # sampling
+    B = 16
+    bos = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
+    codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [B,64]
+    codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
+
+    imgs = vq.decode(codes).clamp(0, 1)
+    output_path = f"samples_{ckpt_name}.png"
+    save_image(imgs, output_path, nrow=4)
+    log(f"Wrote {output_path}")
+
+
 log_file.close()

@@ -109,10 +109,16 @@ for epoch in range(int(cfg["train"]["epochs"])):
 
     # log last loss of epoch to file only
     logger.log(f"Epoch {epoch:03d} | loss={loss.item():.6f} | time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
+    
+    # Save checkpoint every 5 epochs
+    if (epoch + 1) % 5 == 0:
+        ckpt_path = f"{SAVE}_epoch{epoch+1:03d}.pt"
+        torch.save(prior.state_dict(), ckpt_path)
+        logger.log(f"Checkpoint saved → {ckpt_path}")
 
-# ---- save checkpoint ----
+# ---- save final checkpoint ----
 torch.save(prior.state_dict(), SAVE)
-logger.log(f"Saved → {SAVE}")
+logger.log(f"Final checkpoint saved → {SAVE}")
 
 avg_epoch_time = sum(epoch_times) / len(epoch_times)
 logger.log(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")

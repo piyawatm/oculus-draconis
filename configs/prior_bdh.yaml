@@ -2,11 +2,11 @@
 model:
   name: BDHPrior
   vocab_size: 513
-  d_model: 256
-  n_layer: 6
-  n_head: 4
+  d_model: 384
+  n_layer: 9
+  n_head: 6
   block_size: 65
-  mlp_internal_dim_multiplier: 128
+  mlp_internal_dim_multiplier: 96
   dropout: 0.1
   image_height: 8
   image_width: 8
@@ -15,7 +15,7 @@ model:
 
 train:
   epochs: 30                 # or 30 with best-checkpoint logic
-  batch_size: 128
+  batch_size: 64
   lr: 0.0001                 # I’d reduce from 0.0003 for stability
   clip_grad: 1.0
   seed: 42
