@@ -1,33 +1,23 @@
-Epoch 000 | loss=1.944185 | time=427.97s | total=7.1min
-Epoch 001 | loss=0.142146 | time=427.06s | total=14.3min
-Epoch 002 | loss=0.087252 | time=426.89s | total=21.4min
-Epoch 003 | loss=0.076041 | time=426.84s | total=28.5min
-Epoch 004 | loss=0.071568 | time=426.91s | total=35.6min
-Epoch 005 | loss=0.064818 | time=426.92s | total=42.7min
-Epoch 006 | loss=0.056130 | time=426.93s | total=49.8min
-Epoch 007 | loss=0.041158 | time=426.94s | total=56.9min
-Epoch 008 | loss=0.027853 | time=426.94s | total=64.1min
-Epoch 009 | loss=0.015709 | time=426.94s | total=71.2min
-Epoch 010 | loss=0.007164 | time=426.93s | total=78.3min
-Epoch 011 | loss=0.006647 | time=426.93s | total=85.4min
-Epoch 012 | loss=0.005692 | time=426.87s | total=92.5min
-Epoch 013 | loss=0.015210 | time=426.92s | total=99.6min
-Epoch 014 | loss=0.014816 | time=426.96s | total=106.7min
-Epoch 015 | loss=0.004187 | time=426.93s | total=113.9min
-Epoch 016 | loss=0.001948 | time=426.91s | total=121.0min
-Epoch 017 | loss=0.002128 | time=426.91s | total=128.1min
-Epoch 018 | loss=0.044068 | time=426.92s | total=135.2min
-Epoch 019 | loss=0.007355 | time=426.86s | total=142.3min
-Epoch 020 | loss=0.002534 | time=426.80s | total=149.4min
-Epoch 021 | loss=0.000974 | time=426.71s | total=156.5min
-Epoch 022 | loss=0.000771 | time=426.73s | total=163.7min
-Epoch 023 | loss=0.000436 | time=426.66s | total=170.8min
-Epoch 024 | loss=0.000415 | time=426.72s | total=177.9min
-Epoch 025 | loss=0.000495 | time=426.66s | total=185.0min
-Epoch 026 | loss=0.007667 | time=426.75s | total=192.1min
-Epoch 027 | loss=0.006403 | time=426.82s | total=199.2min
-Epoch 028 | loss=0.002405 | time=426.75s | total=206.3min
-Epoch 029 | loss=0.000719 | time=426.71s | total=213.4min
-Saved → checkpoints/bdh_prior.pt
-Total training time: 213.45 minutes (3.56 hours)
-Average epoch time: 426.89 seconds
+Epoch 000 | loss=1.944185 | time=428.78s | total=7.1min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch001.pt
+Epoch 001 | loss=0.142146 | time=427.52s | total=14.3min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch002.pt
+Epoch 002 | loss=0.087252 | time=427.32s | total=21.4min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch003.pt
+Epoch 003 | loss=0.076041 | time=427.30s | total=28.5min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch004.pt
+Epoch 004 | loss=0.071568 | time=427.32s | total=35.6min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch005.pt
+Epoch 005 | loss=0.064818 | time=427.33s | total=42.8min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch006.pt
+Epoch 006 | loss=0.056130 | time=427.33s | total=49.9min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch007.pt
+Epoch 007 | loss=0.041158 | time=427.33s | total=57.0min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch008.pt
+Epoch 008 | loss=0.027853 | time=427.35s | total=64.1min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch009.pt
+Epoch 009 | loss=0.015709 | time=427.30s | total=71.2min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch010.pt
+Final checkpoint saved → checkpoints/bdh_prior.pt
+Total training time: 71.25 minutes (1.19 hours)
+Average epoch time: 427.49 seconds

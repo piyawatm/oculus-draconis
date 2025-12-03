@@ -1,9 +1,82 @@
 
+============================================================
+Evaluating: checkpoints/bdh_prior.pt
+============================================================
+
 --- Evaluation Metrics ---
-FID: 110.936
-KID: 0.124 +/- 0.014
-Inception Score: 3.458 +/- 0.071
+FID: 120.614
+KID: 0.129 +/- 0.014
+Inception Score: 3.520 +/- 0.078
 
 --- Model Stats ---
 BDH Prior Parameters: 25.43M
 BDH Prior Memory Footprint: 754.1 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch001.pt
+============================================================
+
+--- Evaluation Metrics ---
+FID: 122.432
+KID: 0.079 +/- 0.012
+Inception Score: 3.258 +/- 0.070
+
+--- Model Stats ---
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 1351.3 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch002.pt
+============================================================
+
+--- Evaluation Metrics ---
+FID: 116.135
+KID: 0.123 +/- 0.011
+Inception Score: 2.833 +/- 0.057
+
+--- Model Stats ---
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 1948.7 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch003.pt
+============================================================
+
+--- Evaluation Metrics ---
+FID: 121.652
+KID: 0.127 +/- 0.011
+Inception Score: 2.562 +/- 0.071
+
+--- Model Stats ---
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 2546.6 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch004.pt
+============================================================
+
+--- Evaluation Metrics ---
+FID: 126.594
+KID: 0.118 +/- 0.011
+Inception Score: 2.931 +/- 0.070
+
+--- Model Stats ---
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 1351.9 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch005.pt
+============================================================
+
+--- Evaluation Metrics ---
+FID: 124.308
+KID: 0.120 +/- 0.011
+Inception Score: 2.785 +/- 0.048
+
+--- Model Stats ---
+BDH Prior Parameters: 25.43M
+BDH Prior Memory Footprint: 1949.8 MB
+
+============================================================
+Evaluating: checkpoints/bdh_prior.pt_epoch006.pt
+============================================================
