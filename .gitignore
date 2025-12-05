@@ -16,3 +16,8 @@ __pycache__/
 /data/
 /results/
 data/cifar-10-python.tar.gz
+csci2470fp/
+slurm-*.out
+output_*.txt
+eval_fake/
+eval_real/

@@ -1,172 +1,138 @@
-# eval_metrics.py (fixed dtype handling + fewer workers)
 import torch
-from torchmetrics.image.fid import FrechetInceptionDistance
-from torchmetrics.image.inception import InceptionScore
-from torchmetrics.image.kid import KernelInceptionDistance
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-from models.vqvae import VQVAE
-from models.priors.bdh import BDHPrior  # or GPTPrior
-import torch.nn.functional as F
 import os
-import sys
-import glob
-from torch.amp import autocast
+import shutil
+import yaml
+import argparse
+from argparse import Namespace
+from tqdm import tqdm
+import torch.nn.functional as F
+from torchvision.utils import save_image
+from cleanfid import fid
+from torch_fidelity import calculate_metrics
+
+from models.vqvae import VQVAE
+from models.priors.bdh import BDHPrior
+from train_vqvae import get_data_loader
 from utils import Logger
 
-log_path = "logs/eval_metrics_log.txt"
+# Constants
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+REAL_DIR = "eval_real"
+FAKE_DIR = "eval_fake"
+LOG_FILE = "logs/evaluation.log"
 
-logger = Logger(log_path)
+def load_conf(path):
+    with open(path, 'r') as f:
+        raw = yaml.safe_load(f)
+        if 'model' in raw: raw.update(raw['model'])
+        if 'data' in raw: raw.update(raw['data'])
+        return Namespace(**raw)
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-B, T, Hc, Wc, K = 64, 64, 8, 8, 512
-
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-def measure_memory(fn, *args, **kwargs):
-    torch.cuda.reset_peak_memory_stats()
-    with torch.no_grad():
-        _ = fn(*args, **kwargs)
-    return torch.cuda.max_memory_allocated() / (1024**2)
-
-@torch.no_grad()
-def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
-    """
-    Autoregressive generation:
-    - BOS is provided and never generated again.
-    - Uses AMP (float16) inside forward pass for memory savings.
-    """
-    device = bos.device
-    ids = bos  # [B, 1]
-
-    for _ in range(steps):
-        # respect block_size if model has one
-        block = getattr(prior, "block_size", ids.size(1))
-        idx_cond = ids[:, -block:]  # [B, <=block]
-
-        # AMP context for memory reduction
-        with autocast("cuda", dtype=torch.float16):
-            logits = prior(idx_cond)[:, -1, :]  # [B, vocab]
-            logits = logits / max(1e-8, temperature)
-
-        # forbid BOS from ever being re-generated
-        logits[:, bos_id] = float("-inf")
-
-        # top-k filtering
-        if top_k is not None:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = float("-inf")
-
-        probs = F.softmax(logits, dim=-1)
-        next_id = torch.multinomial(probs, 1)  # [B,1]
-
-        ids = torch.cat([ids, next_id], dim=1)
-
-    return ids[:, 1:]  # drop BOS column
-
-# ------------- helpers -------------
-def to_u8(x: torch.Tensor) -> torch.Tensor:
-    # expects float in [0,1]; returns uint8 in [0,255]
-    return (x.clamp(0, 1) * 255.0).to(torch.uint8)
-
-# ------------- real data -------------
-tfm = transforms.ToTensor()  # float in [0,1]
-real = datasets.CIFAR10("./data", train=False, download=True, transform=tfm)
-real_loader = DataLoader(real, batch_size=B, shuffle=False, num_workers=2, pin_memory=True)
-
-# ------------- models -------------
-vq = VQVAE(codebook_size=K, embed_dim=256, downsample_factor=4).to(device).eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
-
-K_code = 512
-K_vocab = K_code + 1
-Hc, Wc = 8, 8
-T = Hc * Wc
-
-# Find all checkpoint files
-checkpoint_pattern = "checkpoints/bdh_prior*.pt"
-checkpoint_files = sorted(glob.glob(checkpoint_pattern))
-
-# Loop through each checkpoint
-for ckpt_path in checkpoint_files:
-    logger.log(f"\n{'='*60}")
-    logger.log(f"Evaluating: {ckpt_path}")
-    logger.log(f"{'='*60}")
+def generate_fake_images(logger, num_imgs=2000, batch_size=50):
+    if os.path.exists(FAKE_DIR): shutil.rmtree(FAKE_DIR)
+    os.makedirs(FAKE_DIR)
     
-    prior = BDHPrior(
-        vocab_size=K_vocab,         # 513
-        d_model=256,
-        n_layer=6,                  # whatever you used in train_prior
-        n_head=4,
-        block_size=T+1,             # 65
-        mlp_internal_dim_multiplier=128,  # <<< match training
-        dropout=0.1,                # or your train-time value
-    ).to(device).eval()
-    prior.load_state_dict(torch.load(ckpt_path, map_location=device))
+    logger.log(f"Generating {num_imgs} fake images to {FAKE_DIR}...")
+    
+    # Load Models
+    v_conf = load_conf("configs/vqvae_config.yaml")
+    p_conf = load_conf("configs/bdh_config.yaml")
+    
+    vqvae = VQVAE(v_conf).to(DEVICE)
+    vqvae.load_state_dict(torch.load("checkpoints/vqvae_best.pt", map_location=DEVICE))
+    vqvae.eval()
+    
+    prior = BDHPrior(p_conf).to(DEVICE)
+    prior.load_state_dict(torch.load("checkpoints/prior_best.pt", map_location=DEVICE))
+    prior.eval()
+    
+    bos_token = p_conf.vocab_size - 1
+    H = W = int(p_conf.block_size ** 0.5)
+    
+    count = 0
+    pbar = tqdm(total=num_imgs, desc="Generating Fakes")
+    
+    while count < num_imgs:
+        curr_batch = min(batch_size, num_imgs - count)
+        idx = torch.full((curr_batch, 1), bos_token, dtype=torch.long).to(DEVICE)
+        
+        with torch.no_grad():
+            for _ in range(p_conf.block_size):
+                logits, _ = prior(idx)
+                last_logits = logits[:, -1, :]
+                last_logits[:, bos_token] = float('-inf')
+                
+                probs = F.softmax(last_logits, dim=-1)
+                next_idx = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, next_idx), dim=1)
+            
+            codes = idx[:, 1:].view(curr_batch, H, W)
+            z_q = vqvae.quantizer.embedding(codes).permute(0, 3, 1, 2)
+            images = vqvae.decoder(z_q)
+            
+            for j in range(curr_batch):
+                save_image(images[j], f"{FAKE_DIR}/{count}.png", normalize=True, value_range=(-1, 1))
+                count += 1
+                pbar.update(1)
+    pbar.close()
 
-    # ------------- metrics -------------
-    fid = FrechetInceptionDistance(feature=2048).to(device)
-    iscore = InceptionScore().to(device)
-    kid = KernelInceptionDistance(subset_size=50).to(device)
+def extract_real_images(logger, num_imgs=2000):
+    if os.path.exists(REAL_DIR):
+        if len(os.listdir(REAL_DIR)) >= num_imgs:
+            logger.log(f"Found {len(os.listdir(REAL_DIR))} existing real images. Skipping extraction.")
+            return
 
-    # real features (uint8)
-    for x, _ in real_loader:
-        x_u8 = to_u8(x).to(device, non_blocking=True)  # uint8 NCHW
-        fid.update(x_u8, real=True)
-        kid.update(x_u8, real=True)
+    if os.path.exists(REAL_DIR): shutil.rmtree(REAL_DIR)
+    os.makedirs(REAL_DIR)
+    
+    logger.log(f"Extracting {num_imgs} real images from FFHQ to {REAL_DIR}...")
+    loader = get_data_loader(batch_size=50)
+    
+    count = 0
+    pbar = tqdm(total=num_imgs, desc="Extracting Reals")
+    
+    for batch in loader:
+        batch = batch.to(DEVICE)
+        for j in range(batch.size(0)):
+            if count >= num_imgs: break
+            save_image(batch[j], f"{REAL_DIR}/{count}.png", normalize=True, value_range=(-1, 1))
+            count += 1
+            pbar.update(1)
+        if count >= num_imgs: break
+    pbar.close()
 
-    # generate at least ~10k images
-    target = 10000
-    seen = 0
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num_imgs', type=int, default=2000)
+    args = parser.parse_args()
+    
+    logger = Logger(LOG_FILE)
+    logger.log("--- Starting Evaluation ---")
+    
+    try:
+        extract_real_images(logger, num_imgs=args.num_imgs)
+        generate_fake_images(logger, num_imgs=args.num_imgs)
+        
+        logger.log("Calculating FID and KID...")
+        fid_score = fid.compute_fid(FAKE_DIR, REAL_DIR)
+        kid_score = fid.compute_kid(FAKE_DIR, REAL_DIR)
+        
+        logger.log(f"FID Score: {fid_score:.2f}")
+        logger.log(f"KID Score: {kid_score:.5f}")
+        
+        logger.log("Calculating Inception Score...")
+        metrics = calculate_metrics(input1=FAKE_DIR, isc=True, verbose=False)
+        is_mean = metrics['inception_score_mean']
+        is_std = metrics['inception_score_std']
+        
+        logger.log(f"IS Score:  {is_mean:.2f} +/- {is_std:.2f}")
+        logger.log("Evaluation Complete.")
+        
+    except Exception as e:
+        logger.log(f"ERROR during evaluation: {e}")
+        raise e
+    finally:
+        logger.close()
 
-    bos_id = K_code
-
-    while seen < target:
-        b = min(B, target - seen)
-        bos = torch.full((b, 1), bos_id, dtype=torch.long, device=device)
-
-        with torch.no_grad(), autocast("cuda", dtype=torch.float16):
-            codes_seq = generate_without_bos(
-                prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50
-            )  # [b,64]
-
-            codes = codes_seq.view(b, Hc, Wc)
-            imgs = vq.decode(codes).clamp(0, 1)
-
-        imgs_u8 = (imgs.clamp(0, 1) * 255.0).to(torch.uint8)
-        fid.update(imgs_u8.to(device), real=False)
-        iscore.update(imgs_u8.to(device))
-        kid.update(imgs_u8, real=False)
-
-        # free intermediates
-        del codes_seq, codes, imgs, imgs_u8
-        torch.cuda.empty_cache()
-
-        seen += b
-
-    # ---- results ----
-    logger.log("\n--- Evaluation Metrics ---")
-
-    logger.log(f"FID: {float(fid.compute()):.3f}")
-
-    kid_mean, kid_std = kid.compute()
-    logger.log(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
-
-    m, s = iscore.compute()
-    logger.log(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
-
-    # ---- model stats ----
-    logger.log("\n--- Model Stats ---")
-    prior_params = count_parameters(prior)
-    logger.log(f"BDH Prior Parameters: {prior_params/1e6:.2f}M")
-
-    if torch.cuda.is_available():
-        sample_codes = torch.randint(0, K_code, (1, Hc, Wc), device=device)
-        bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
-        prior_mem = measure_memory(prior, bos)
-        logger.log(f"BDH Prior Memory Footprint: {prior_mem:.1f} MB")
-    else:
-        logger.log("CUDA not available — skipping memory footprint measurement.")
-
-logger.close()
+if __name__ == "__main__":
+    main()

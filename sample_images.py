@@ -1,110 +1,98 @@
 import torch
+import torch.nn.functional as F
 from torchvision.utils import save_image
 from models.vqvae import VQVAE
 from models.priors.bdh import BDHPrior
-import torch.nn.functional as F
+from utils import load_config, Logger
 import os
-import sys
-import glob
+import argparse
+from argparse import Namespace
+import yaml
+import tqdm
 
+# Constants
+VQVAE_CHECKPOINT = "checkpoints/vqvae_best.pt"
+PRIOR_CHECKPOINT = "checkpoints/prior_best.pt"
+VQVAE_CONFIG = "configs/vqvae_config.yaml"
+PRIOR_CONFIG = "configs/bdh_config.yaml"
+LOG_FILE = "logs/sampling.log"
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# ------------- logging setup (no terminal prints) -------------
-log_path = "logs/sample_images_log.txt"
-os.makedirs("logs", exist_ok=True)
-log_file = open(log_path, "w")
-
-
-def log(msg: str):
-    log_file.write(msg + "\n")
-    log_file.flush()
-
-
-# Silence stdout
-sys.stdout = open(os.devnull, "w")
-
-
-def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
-    """Autoregressive sampling that forbids BOS from being generated."""
-    ids = bos  # [B,1]
-    for _ in range(steps):
-        idx_cond = ids[:, -getattr(prior, "block_size", ids.size(1)):]  # respect block_size if present
-        logits = prior(idx_cond)[:, -1, :] / max(1e-8, temperature)      # [B, V]
-        # forbid BOS token
-        logits[:, bos_id] = float("-inf")
-        if top_k is not None:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = float("-inf")
-        probs = F.softmax(logits, dim=-1)
-        next_id = torch.multinomial(probs, 1)                             # [B,1]
-        ids = torch.cat([ids, next_id], dim=1)
-    return ids[:, 1:]  # drop BOS
-
-
-# VQ-VAE specifics
-Hc, Wc = 8, 8
-T = Hc * Wc           # 64
-K_code = 512
-K_vocab = K_code + 1  # 513 with BOS
-bos_id = K_code       # 512
-
-
-# load VQ-VAE (shared across all checkpoints)
-vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
-
-
-# Find all checkpoint files
-checkpoint_pattern = "checkpoints/bdh_prior*.pt"
-checkpoint_files = sorted(glob.glob(checkpoint_pattern))
-
-
-# Loop through each checkpoint
-for ckpt_path in checkpoint_files:
-    # Extract checkpoint name for output filename
-    ckpt_name = os.path.splitext(os.path.basename(ckpt_path))[0]
+def load_model(config_path, model_cls, ckpt_path, logger):
+    with open(config_path, 'r') as f:
+        raw_conf = yaml.safe_load(f)
+        if 'model' in raw_conf: raw_conf.update(raw_conf['model'])
+        if 'data' in raw_conf: raw_conf.update(raw_conf['data'])
+        if 'training' in raw_conf: raw_conf.update(raw_conf['training'])
+        config = Namespace(**raw_conf)
+        
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = model_cls(config).to(device)
     
-    log(f"\n{'='*50}")
-    log(f"Sampling from: {ckpt_path}")
-    log(f"{'='*50}")
+    if os.path.exists(ckpt_path):
+        logger.log(f"Loading checkpoint from {ckpt_path}")
+        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+    else:
+        logger.log(f"WARNING: {ckpt_path} not found! Using random initialization.")
+        
+    model.eval()
+    return model, config, device
+
+def sample_images(n_samples=16, temperature=1.0):
+    logger = Logger(LOG_FILE)
+    logger.log(f"--- Starting Image Sampling (N={n_samples}, T={temperature}) ---")
     
-    prior = BDHPrior(
-        vocab_size=K_vocab,
-        d_model=256,
-        n_layer=6,
-        n_head=4,
-        block_size=T+1,               # 65
-        mlp_internal_dim_multiplier=128,  # <<< must match train_prior config
-        dropout=0.1,                     # or whatever you used
-    ).to(device).eval()
-    prior.load_state_dict(torch.load(ckpt_path, map_location=device))
+    try:
+        # Load Models
+        vqvae, v_conf, device = load_model(VQVAE_CONFIG, VQVAE, VQVAE_CHECKPOINT, logger)
+        prior, p_conf, _ = load_model(PRIOR_CONFIG, BDHPrior, PRIOR_CHECKPOINT, logger)
+        
+        logger.log(f"Vocab Size: {p_conf.vocab_size} | Block Size: {p_conf.block_size}")
+        
+        # 1. Initialize with BOS
+        bos_token = p_conf.vocab_size - 1
+        idx = torch.full((n_samples, 1), bos_token, dtype=torch.long).to(device)
+        
+        logger.log("Starting Autoregressive Generation...")
+        
+        # 2. Generation Loop
+        for _ in tqdm.tqdm(range(p_conf.block_size), desc="Sampling"):
+            with torch.no_grad():
+                logits, _ = prior(idx)
+                last_logits = logits[:, -1, :] / temperature
+                
+                # Mask BOS so we don't predict it again
+                last_logits[:, bos_token] = float('-inf')
+                
+                probs = F.softmax(last_logits, dim=-1)
+                next_idx = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, next_idx), dim=1)
+                
+        # 3. Decode
+        generated_codes = idx[:, 1:] # Remove BOS
+        H = W = int(p_conf.block_size ** 0.5)
+        codes_grid = generated_codes.view(n_samples, H, W)
+        
+        with torch.no_grad():
+            z_q = vqvae.quantizer.embedding(codes_grid).permute(0, 3, 1, 2)
+            images = vqvae.decoder(z_q)
+            
+        # 4. Save
+        os.makedirs("results", exist_ok=True)
+        save_path = "results/generated_faces.png"
+        save_image(images, save_path, nrow=4, normalize=True, value_range=(-1, 1))
+        
+        logger.log(f"Success! Saved grid to {save_path}")
+        
+    except Exception as e:
+        logger.log(f"ERROR during sampling: {e}")
+        raise e
+    finally:
+        logger.close()
 
-    # sampling
-    B = 16
-    bos = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
-    codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)  # [B,64]
-    codes = codes_seq.view(B, Hc, Wc)  # [B,8,8]
-
-    imgs = vq.decode(codes).clamp(0, 1)
-    output_path = f"samples_{ckpt_name}.png"
-    save_image(imgs, output_path, nrow=4)
-    log(f"Wrote {output_path}")
-
-    # imgs_32 = vq.decode(codes).clamp(0, 1)
-
-    # Upsample to 64 by 64
-    imgs_64 = F.interpolate(
-        imgs, size=(64, 64),
-        mode="bilinear",
-        align_corners=False,
-        antialias=True,
-    )
-
-    output_path = f"samples_{ckpt_name}_64x64.png"
-    save_image(imgs_64, output_path, nrow=4)
-    log(f"Wrote {output_path}")
-
-
-log_file.close()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--n_samples', type=int, default=16)
+    parser.add_argument('--temp', type=float, default=1.0)
+    args = parser.parse_args()
+    
+    sample_images(n_samples=args.n_samples, temperature=args.temp)
