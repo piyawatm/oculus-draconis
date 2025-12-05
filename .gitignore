@@ -11,7 +11,7 @@ __pycache__/
 # Ignore VSCode settings
 .vscode/
 # Ignore log files
-*.log
+# *.log
 # Ignore data and results
 /data/
 /results/

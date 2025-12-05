@@ -7,7 +7,7 @@
 #SBATCH -n 1                 # 1 Task (Python script)
 #SBATCH -c 10                # 10 CPU cores (Near your 12-core limit, leaves buffer)
 #SBATCH --mem=64G            # Double your memory (Safe limit, well below 192G max)
-#SBATCH -t 12:00:00           # (Max is 48 hours for 2 GPUs if you need longer)
+#SBATCH -t 15:00:00           # (Max is 48 hours for 2 GPUs if you need longer)
 #SBATCH -J optimized_job
 #SBATCH -o output_%j.txt
 
@@ -21,6 +21,6 @@ nvidia-smi
 # python train_vqvae.py
 # python extract_codes.py
 # python train_prior.py
-python sample_images.py --temp 0.8
+# python sample_images.py --temp 0.8 --top_p 0.9
 
-# python eval_metrics.py
+python eval_metrics.py

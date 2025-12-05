@@ -1,0 +1,9 @@
+--- Starting Evaluation ---
+Found 2000 existing real images. Skipping extraction.
+Generating 2000 fake images to eval_fake...
+Calculating FID and KID...
+FID Score: 59.82
+KID Score: 0.04435
+Calculating Inception Score...
+IS Score:  2.44 +/- 0.08
+Evaluation Complete.

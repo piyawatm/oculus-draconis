@@ -26,7 +26,22 @@ def load_conf(path):
         raw = yaml.safe_load(f)
         if 'model' in raw: raw.update(raw['model'])
         if 'data' in raw: raw.update(raw['data'])
+        if 'training' in raw: raw.update(raw['training'])
         return Namespace(**raw)
+
+def load_state_dict_safe(model, ckpt_path):
+    """Loads state dict handling torch.compile prefix."""
+    print(f"Loading checkpoint from {ckpt_path}")
+    state_dict = torch.load(ckpt_path, map_location=DEVICE)
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith("_orig_mod."):
+            new_key = k[10:] # remove "_orig_mod."
+            new_state_dict[new_key] = v
+        else:
+            new_state_dict[k] = v
+    model.load_state_dict(new_state_dict)
+    return model
 
 def generate_fake_images(logger, num_imgs=2000, batch_size=50):
     if os.path.exists(FAKE_DIR): shutil.rmtree(FAKE_DIR)
@@ -39,11 +54,13 @@ def generate_fake_images(logger, num_imgs=2000, batch_size=50):
     p_conf = load_conf("configs/bdh_config.yaml")
     
     vqvae = VQVAE(v_conf).to(DEVICE)
-    vqvae.load_state_dict(torch.load("checkpoints/vqvae_best.pt", map_location=DEVICE))
+    # Apply Safe Load
+    vqvae = load_state_dict_safe(vqvae, "checkpoints/vqvae_best.pt")
     vqvae.eval()
     
     prior = BDHPrior(p_conf).to(DEVICE)
-    prior.load_state_dict(torch.load("checkpoints/prior_best.pt", map_location=DEVICE))
+    # Apply Safe Load
+    prior = load_state_dict_safe(prior, "checkpoints/prior_best.pt")
     prior.eval()
     
     bos_token = p_conf.vocab_size - 1
@@ -62,12 +79,21 @@ def generate_fake_images(logger, num_imgs=2000, batch_size=50):
                 last_logits = logits[:, -1, :]
                 last_logits[:, bos_token] = float('-inf')
                 
+                # Optional: Add Temperature/Top-p here if you want better quality fakes
+                # For standard FID, pure sampling is often used, but Top-p=0.9 is fair game.
                 probs = F.softmax(last_logits, dim=-1)
                 next_idx = torch.multinomial(probs, num_samples=1)
                 idx = torch.cat((idx, next_idx), dim=1)
             
             codes = idx[:, 1:].view(curr_batch, H, W)
-            z_q = vqvae.quantizer.embedding(codes).permute(0, 3, 1, 2)
+            
+            # Handle VQVAE naming safely
+            if hasattr(vqvae, '_vq_vae'):
+                quantizer = vqvae._vq_vae
+            else:
+                quantizer = vqvae.quantizer
+                
+            z_q = quantizer.embedding(codes).permute(0, 3, 1, 2)
             images = vqvae.decoder(z_q)
             
             for j in range(curr_batch):
