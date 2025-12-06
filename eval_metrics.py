@@ -1,65 +1,56 @@
-# eval_metrics.py — PixelCNN + VQ-VAE (FFHQ-64) with FID, IS, KID + model stats
+# eval_metrics.py  (PixelCNN + VQ-VAE on FFHQ-64 with torchmetrics)
 
 import math
+import yaml
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torchvision import transforms
 
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.inception import InceptionScore
 from torchmetrics.image.kid import KernelInceptionDistance
 
-from datasets import load_from_disk, load_dataset
-
 from models.vqvae import VQVAE
 from models.priors.pixelcnn import PixelCNNPrior
+from train_vqvae import get_data_loader
 from utils import load_config
-import yaml
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ---------------- config + models ----------------
-# VQ-VAE
-vq_conf = load_config("configs/vqvae_config.yaml")
-vq = VQVAE(vq_conf).to(device).eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae_best.pt", map_location=device))
-
-K_code = int(vq_conf.num_embeddings)  # e.g., 1024
-K_vocab = K_code + 1                  # +1 for BOS
-
-# PixelCNN prior
-prior_cfg = yaml.safe_load(open("configs/prior_pixelcnn.yaml"))
-model_cfg = dict(prior_cfg["model"])
-model_name = model_cfg.pop("name", "PixelCNNPrior")
-assert model_name == "PixelCNNPrior", f"eval_metrics.py is set up for PixelCNNPrior, got {model_name}"
-
-block_size = int(prior_cfg["model"]["block_size"])  # e.g., 256
-side = int(math.isqrt(block_size))                  # e.g., 16
-assert side * side == block_size, f"block_size {block_size} is not a perfect square"
-
-cfg_vocab = int(prior_cfg["model"]["vocab_size"])
-assert cfg_vocab == K_vocab, (
-    f"vocab_size mismatch: prior cfg has {cfg_vocab}, "
-    f"but VQ-VAE has num_embeddings {K_code} → vocab_size {K_vocab}"
-)
-
-prior = PixelCNNPrior(**model_cfg).to(device).eval()
-prior.load_state_dict(torch.load(prior_cfg["train"]["save_path"], map_location=device))
-
-# ---------------- constants ----------------
-B = 64
-TARGET_SAMPLES = 10000
+# ---------------- config + constants ----------------
+BATCH_FAKE = 64          # batch size for generated images
+NUM_REAL = 2000          # how many real images to use
+NUM_FAKE = 2000          # how many fake images to generate
 ENABLE_KID = True
 
+# Load VQ-VAE config (same as training)
+vq_conf = load_config("configs/vqvae_config.yaml")
+
+# Load PixelCNN config
+prior_cfg = yaml.safe_load(open("configs/prior_pixelcnn.yaml", "r"))
+model_cfg = prior_cfg["model"]
+train_cfg = prior_cfg["train"]
+
+K_vocab = int(model_cfg["vocab_size"])
+block_size = int(model_cfg["block_size"])      # e.g. 256 for 16x16 codes
+side = int(math.isqrt(block_size))
+assert side * side == block_size, "block_size must be a perfect square (e.g. 256 → 16x16)"
+
 # ---------------- helpers ----------------
+def to_01(x: torch.Tensor) -> torch.Tensor:
+    """
+    Convert images from [-1,1] to [0,1] and clamp.
+    """
+    return ((x + 1.0) / 2.0).clamp(0.0, 1.0)
+
+
 def to_u8(x: torch.Tensor) -> torch.Tensor:
-    """float in [0,1] → uint8 in [0,255]"""
-    return (x.clamp(0, 1) * 255.0).to(torch.uint8)
+    """
+    Convert float [0,1] → uint8 [0,255] as required by torch_fidelity backend.
+    """
+    return (x * 255.0).clamp(0, 255).to(torch.uint8)
 
 
 def count_parameters(model) -> int:
-    """Number of trainable parameters."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
@@ -73,125 +64,132 @@ def measure_memory(fn, *args, **kwargs) -> float:
     return torch.cuda.max_memory_allocated() / (1024 ** 2)
 
 
-@torch.no_grad()
-def decode_codes(vq_model: VQVAE, codes: torch.Tensor) -> torch.Tensor:
-    """
-    codes: [B, Hc, Wc] integer indices in [0, K_code-1]
-    returns: images [B, 3, 64, 64] in [0,1]
-    """
-    B, Hc, Wc = codes.shape
-    flat = codes.view(B, -1)                                    # [B, T]
-    z = vq_model.quantizer.embedding(flat)                      # [B, T, D]
-    z = z.view(B, Hc, Wc, -1).permute(0, 3, 1, 2).contiguous()  # [B, D, Hc, Wc]
-    x = vq_model.decoder(z)                                     # typically [-1,1]
-    x = (x + 1.0) / 2.0                                         # → [0,1]
-    return x.clamp(0.0, 1.0)
+# ---------------- load models ----------------
+print("Loading VQ-VAE...")
+vq = VQVAE(vq_conf).to(device).eval()
+vq.load_state_dict(torch.load("checkpoints/vqvae_best.pt", map_location=device))
+
+# quantizer handle (matches your training/sampling code)
+if hasattr(vq, "_vq_vae"):
+    quantizer = vq._vq_vae
+else:
+    quantizer = vq.quantizer
+
+print("Loading PixelCNN prior...")
+prior = PixelCNNPrior(
+    vocab_size=K_vocab,
+    d_model=int(model_cfg["d_model"]),
+    n_layers=int(model_cfg["n_layers"]),
+    kernel_size=int(model_cfg["kernel_size"]),
+    block_size=block_size,
+    dropout=float(model_cfg.get("dropout", 0.0)),
+).to(device).eval()
+
+prior.load_state_dict(torch.load(train_cfg["save_path"], map_location=device))
 
 
+# ---------------- PixelCNN sampling ----------------
 @torch.no_grad()
-def sample_pixelcnn(prior, side: int, temperature: float = 1.0, batch_size: int = 64) -> torch.Tensor:
+def sample_pixelcnn(prior, batch_size=64, temperature=1.0):
     """
-    Raster-scan PixelCNN sampling over side x side grid.
-    Produces integer codes in [0, K_code-1].
+    Sample discrete code grids [B, side, side] from PixelCNNPrior.
     """
     codes = torch.zeros(batch_size, side, side, dtype=torch.long, device=device)
-    bos_id = K_code  # last vocab index
 
     for i in range(side):
         for j in range(side):
-            flat = codes.view(batch_size, -1)                  # [B, T]
-            flat = flat.clamp(0, K_vocab - 1)
+            flat = codes.view(batch_size, -1).clamp(0, K_vocab - 1)   # [B, block_size]
+            logits = prior(flat)                                      # [B, block_size, K_vocab]
+            logits = logits.view(batch_size, side, side, K_vocab)     # [B, H, W, K_vocab]
 
-            logits = prior(flat)                               # [B, T, K_vocab]
-            logits = logits.view(batch_size, side, side, K_vocab)
-
-            logits_ij = logits[:, i, j, :] / max(temperature, 1e-8)
-
-            # forbid BOS
-            logits_ij[:, bos_id] = float("-inf")
-
-            probs = F.softmax(logits_ij, dim=-1)               # [B, K_vocab]
-            next_id = torch.multinomial(probs, 1).squeeze(-1)  # [B]
-            next_id = next_id.clamp(0, K_code - 1)
+            logits_ij = logits[:, i, j, :] / max(temperature, 1e-8)   # [B, K_vocab]
+            probs = F.softmax(logits_ij, dim=-1)
+            next_id = torch.multinomial(probs, 1).squeeze(-1)         # [B]
+            next_id = next_id.clamp(0, K_vocab - 1)
 
             codes[:, i, j] = next_id
 
     return codes  # [B, side, side]
 
 
-# ---------------- real dataset: FFHQ-64 from disk ----------------
-print("Loading FFHQ-64 real images for metrics...")
+@torch.no_grad()
+def decode_codes(codes: torch.Tensor) -> torch.Tensor:
+    """
+    codes: [B, side, side] LongTensor
+    returns images in [0,1] float, shape [B, 3, 64, 64]
+    """
+    # quantizer.embedding: [num_embeddings, embedding_dim]
+    z_q = quantizer.embedding(codes).permute(0, 3, 1, 2).contiguous()
+    imgs = vq.decoder(z_q)              # typically in [-1, 1]
+    imgs_01 = to_01(imgs)               # [0,1]
+    return imgs_01
 
-transform = transforms.ToTensor()  # [0,1]
-
-try:
-    ds = load_from_disk("data/ffhq64_local")
-except Exception:
-    try:
-        ds = load_from_disk("data/ffhq64_test_subset")
-    except Exception:
-        print("Local FFHQ dataset not found, downloading now...")
-        ds = load_dataset("Dmini/FFHQ-64x64", split="train")
-        ds.save_to_disk("data/ffhq64_local")
-
-def collate_fn(examples):
-    imgs = [transform(ex["image"].convert("RGB")) for ex in examples]
-    return torch.stack(imgs)
-
-real_loader = DataLoader(
-    ds,
-    batch_size=B,
-    shuffle=False,
-    num_workers=2,
-    pin_memory=True,
-    collate_fn=collate_fn,
-)
 
 # ---------------- metrics ----------------
 fid = FrechetInceptionDistance(feature=2048).to(device)
 iscore = InceptionScore().to(device)
 kid = KernelInceptionDistance(subset_size=50).to(device) if ENABLE_KID else None
 
-# real images → uint8
+# ---------------- real images (FFHQ-64 from your loader) ----------------
+print("Loading FFHQ-64 real images for metrics...")
+real_loader = get_data_loader(batch_size=BATCH_FAKE)
+
 print("Accumulating real features...")
-for x in real_loader:
-    x_u8 = to_u8(x).to(device, non_blocking=True)
+seen_real = 0
+for batch in real_loader:
+    # get_data_loader returns just images (no labels), normalized to [-1,1]
+    x = batch.to(device)
+    x_01 = to_01(x)              # [0,1] float
+    x_u8 = to_u8(x_01)           # uint8 [0,255] NCHW
+
     fid.update(x_u8, real=True)
     if ENABLE_KID:
         kid.update(x_u8, real=True)
 
-# ---------------- generate & evaluate ----------------
+    # Optional: IS on real images too (harmless)
+    iscore.update(x_u8)
+
+    seen_real += x.size(0)
+    if seen_real >= NUM_REAL:
+        break
+
+# ---------------- fake images (PixelCNN + VQ-VAE) ----------------
 print("Generating samples from PixelCNN + VQ-VAE...")
-seen = 0
-while seen < TARGET_SAMPLES:
-    b = min(B, TARGET_SAMPLES - seen)
+seen_fake = 0
 
-    # 1) sample latent codes
-    codes = sample_pixelcnn(prior, side=side, temperature=1.0, batch_size=b)  # [b, side, side]
+while seen_fake < NUM_FAKE:
+    b = min(BATCH_FAKE, NUM_FAKE - seen_fake)
 
-    # 2) decode to images [b,3,64,64] in [0,1]
-    imgs = decode_codes(vq, codes.to(device))
+    # 1) sample codes
+    codes = sample_pixelcnn(prior, batch_size=b, temperature=1.0)
 
-    # 3) uint8 for metrics
-    imgs_u8 = to_u8(imgs).to(device)
+    # 2) decode to [0,1] float
+    imgs_01 = decode_codes(codes).to(device)
 
+    # 3) convert to uint8
+    imgs_u8 = to_u8(imgs_01)
+
+    # 4) update metrics
     fid.update(imgs_u8, real=False)
-    iscore.update(imgs_u8)
     if ENABLE_KID:
         kid.update(imgs_u8, real=False)
+    iscore.update(imgs_u8)
 
-    seen += b
-    print(f"Generated {seen}/{TARGET_SAMPLES}", end="\r")
+    seen_fake += b
+    print(f"Generated {seen_fake}/{NUM_FAKE} fake images", end="\r")
 
-print("\n\n--- Evaluation Metrics ---")
+print("\nDone generating fakes.")
+
+# ---------------- results ----------------
+print("\n--- Evaluation Metrics (PixelCNN + VQ-VAE) ---")
 print(f"FID: {float(fid.compute()):.3f}")
 
 if ENABLE_KID:
     kid_mean, kid_std = kid.compute()
-    print(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
+    print(f"KID: {float(kid_mean):.6f} +/- {float(kid_std):.6f}")
 
-m, s = iscore.compute()
-print(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
+is_mean, is_std = iscore.compute()
+print(f"Inception Score: {float(is_mean):.3f} +/- {float(is_std):.3f}")
 
 # ---------------- model stats ----------------
 print("\n--- Model Stats ---")
