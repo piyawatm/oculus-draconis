@@ -1,260 +1,230 @@
-# vqvae.py
-# VQ-VAE for BDH+VQ project (PyTorch)
-# - Non-EMA straight-through vector quantization
-# - CIFAR-friendly defaults: 32x32 -> 8x8 latent grid (downsample_factor=4)
-# - Uses SiLU activations (no inplace ops)
-# - API:
-#     encode(x) -> [B,Hc,Wc] int codes
-#     decode(indices) -> [B,C,H,W] image
-#     forward(x) -> (recon, loss_dict, indices)
-
-from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-# -------------------------
-# Building blocks
-# -------------------------
-class ResidualBlock(nn.Module):
-    def __init__(self, channels: int):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.SiLU(),                              # non-inplace
-            nn.Conv2d(channels, channels, 3, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(channels, channels, 1),
+class Residual(nn.Module):
+    def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
+        super(Residual, self).__init__()
+        self._block = nn.Sequential(
+            nn.ReLU(True),
+            nn.Conv2d(in_channels=in_channels,
+                      out_channels=num_residual_hiddens,
+                      kernel_size=3, stride=1, padding=1, bias=False),
+            nn.ReLU(True),
+            nn.Conv2d(in_channels=num_residual_hiddens,
+                      out_channels=num_hiddens,
+                      kernel_size=1, stride=1, bias=False)
         )
+    
+    def forward(self, x):
+        return x + self._block(x)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.net(x)
+
+class ResidualStack(nn.Module):
+    def __init__(self, in_channels, num_hiddens, num_residual_hiddens, num_residual_layers):
+        super(ResidualStack, self).__init__()
+        self._num_residual_layers = num_residual_layers
+        self._layers = nn.ModuleList([
+            Residual(in_channels, num_hiddens, num_residual_hiddens)
+            for _ in range(self._num_residual_layers)
+        ])
+
+    def forward(self, x):
+        for i in range(self._num_residual_layers):
+            x = self._layers[i](x)
+        return F.relu(x)
 
 
 class Encoder(nn.Module):
-    """
-    Default: 32x32 -> 8x8 with downsample_factor=4 (two stride-2 convs).
-    """
-    def __init__(
-        self,
-        in_channels: int = 3,
-        channels: int = 128,
-        embed_dim: int = 256,
-        downsample_factor: int = 4,
-    ):
-        super().__init__()
-        assert downsample_factor in (4, 8, 16), "downsample_factor must be 4, 8, or 16"
+    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+        super(Encoder, self).__init__()
 
-        layers = []
-        # First downsample (32 -> 16)
-        layers += [nn.Conv2d(in_channels, channels, 4, stride=2, padding=1), nn.SiLU()]
-        # Additional downsamples if needed
-        factor = 2
-        c = channels
-        while factor < downsample_factor:
-            layers += [nn.Conv2d(c, c, 4, stride=2, padding=1), nn.SiLU()]
-            factor *= 2
+        self._conv_1 = nn.Conv2d(in_channels=in_channels,
+                                 out_channels=num_hiddens // 2,
+                                 kernel_size=4,
+                                 stride=2, padding=1)
+        self._conv_2 = nn.Conv2d(in_channels=num_hiddens // 2,
+                                 out_channels=num_hiddens,
+                                 kernel_size=4,
+                                 stride=2, padding=1)
+        self._conv_3 = nn.Conv2d(in_channels=num_hiddens,
+                                 out_channels=num_hiddens,
+                                 kernel_size=3,
+                                 stride=1, padding=1)
+        self._residual_stack = ResidualStack(in_channels=num_hiddens,
+                                             num_hiddens=num_hiddens,
+                                             num_residual_hiddens=num_residual_hiddens,
+                                             num_residual_layers=num_residual_layers)
 
-        # Bottleneck residual stack
-        layers += [ResidualBlock(c), ResidualBlock(c), nn.SiLU()]
-        # Project to embedding dim D
-        layers += [nn.Conv2d(c, embed_dim, 1)]
-
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # [B, D, Hc, Wc]
-        return self.net(x)
+    def forward(self, inputs):
+        x = self._conv_1(inputs)
+        x = F.relu(x)
+        
+        x = self._conv_2(x)
+        x = F.relu(x)
+        
+        x = self._conv_3(x)
+        return self._residual_stack(x)
 
 
 class Decoder(nn.Module):
-    """
-    Mirror of Encoder. Reconstructs images from quantized latents [B, D, Hc, Wc].
-    """
-    def __init__(
-        self,
-        out_channels: int = 3,
-        channels: int = 128,
-        embed_dim: int = 256,
-        upsample_factor: int = 4,
-    ):
-        super().__init__()
-        assert upsample_factor in (4, 8, 16), "upsample_factor must be 4, 8, or 16"
+    def __init__(self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens):
+        super(Decoder, self).__init__()
 
-        layers = []
-        # Project from D to hidden channels
-        layers += [
-            nn.Conv2d(embed_dim, channels, 3, padding=1),
-            ResidualBlock(channels),
-            ResidualBlock(channels),
-            nn.SiLU(),
-        ]
-        # Progressive upsampling by factor 2
-        factor = 1
-        while factor < upsample_factor:
-            layers += [nn.ConvTranspose2d(channels, channels, 4, stride=2, padding=1), nn.SiLU()]
-            factor *= 2
-        # Final conv to image channels
-        layers += [nn.Conv2d(channels, out_channels, 1)]
+        self._conv_1 = nn.Conv2d(in_channels=in_channels,
+                                 out_channels=num_hiddens,
+                                 kernel_size=3, 
+                                 stride=1, padding=1)
+        
+        self._residual_stack = ResidualStack(in_channels=num_hiddens,
+                                             num_hiddens=num_hiddens,
+                                             num_residual_hiddens=num_residual_hiddens,
+                                             num_residual_layers=num_residual_layers)
+        
+        self._conv_trans_1 = nn.ConvTranspose2d(in_channels=num_hiddens, 
+                                                out_channels=num_hiddens // 2,
+                                                kernel_size=4, 
+                                                stride=2, padding=1)
+        
+        self._conv_trans_2 = nn.ConvTranspose2d(in_channels=num_hiddens // 2, 
+                                                out_channels=3,
+                                                kernel_size=4, 
+                                                stride=2, padding=1)
 
-        self.net = nn.Sequential(*layers)
-
-    def forward(self, z_q: torch.Tensor) -> torch.Tensor:
-        # [B, C, H, W] (range not clamped)
-        return self.net(z_q)
+    def forward(self, inputs):
+        x = self._conv_1(inputs)
+        x = self._residual_stack(x)
+        
+        x = self._conv_trans_1(x)
+        x = F.relu(x)
+        
+        return self._conv_trans_2(x)
 
 
-class VectorQuantizer(nn.Module):
-    """
-    Straight-through VQ per van den Oord et al. (2017), non-EMA.
-      - codebook: K x D
-      - input: z_e [B, D, H, W]
-      - output: z_q_st [B, D, H, W], indices [B, H, W]
-    Loss terms:
-      - codebook: || sg[z_e] - e ||^2
-      - commitment: beta * || z_e - sg[e] ||^2
-    """
-    def __init__(self, codebook_size: int, embed_dim: int, beta: float = 0.25):
-        super().__init__()
-        self.codebook_size = codebook_size
-        self.embed_dim = embed_dim
-        self.beta = beta
+class VectorQuantizerEMA(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim, commitment_cost, decay, epsilon=1e-5):
+        super(VectorQuantizerEMA, self).__init__()
+        
+        # Ensure explicit casting to int
+        self._embedding_dim = int(embedding_dim)
+        self._num_embeddings = int(num_embeddings)
+        
+        self._embedding = nn.Embedding(self._num_embeddings, self._embedding_dim)
+        self._embedding.weight.data.normal_()
+        self._commitment_cost = commitment_cost
+        
+        self.register_buffer('_ema_cluster_size', torch.zeros(num_embeddings))
+        self._ema_w = nn.Parameter(torch.Tensor(num_embeddings, self._embedding_dim))
+        self._ema_w.data.normal_()
+        
+        self._decay = decay
+        self._epsilon = epsilon
 
-        self.embedding = nn.Embedding(codebook_size, embed_dim)
-        nn.init.uniform_(self.embedding.weight, -1.0 / codebook_size, 1.0 / codebook_size)
+    def forward(self, inputs):
+        # inputs shape: [batch_size, num_channels, height, width]
+        # Permute to [batch_size, height, width, num_channels] for embedding lookup
+        inputs = inputs.permute(0, 2, 3, 1).contiguous()
+        input_shape = inputs.shape
+        
+        # Flatten input
+        flat_input = inputs.view(-1, self._embedding_dim)
+        
+        # Calculate distances
+        distances = (torch.sum(flat_input**2, dim=1, keepdim=True) 
+                    + torch.sum(self._embedding.weight**2, dim=1)
+                    - 2 * torch.matmul(flat_input, self._embedding.weight.t()))
+            
+        # Encoding
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+        encodings = torch.zeros(encoding_indices.shape[0], self._num_embeddings, device=inputs.device)
+        encodings.scatter_(1, encoding_indices, 1)
+        
+        # Quantize and unflatten
+        quantized = torch.matmul(encodings, self._embedding.weight).view(input_shape)
+        
+        # Use EMA to update the embedding vectors
+        if self.training:
+            self._ema_cluster_size = self._ema_cluster_size * self._decay + \
+                                     (1 - self._decay) * torch.sum(encodings, 0)
+            
+            # Laplace smoothing of the cluster size
+            n = torch.sum(self._ema_cluster_size.data)
+            self._ema_cluster_size = (
+                (self._ema_cluster_size + self._epsilon)
+                / (n + self._num_embeddings * self._epsilon) * n)
+            
+            dw = torch.matmul(encodings.t(), flat_input)
+            self._ema_w = nn.Parameter(self._ema_w * self._decay + (1 - self._decay) * dw)
+            
+            self._embedding.weight = nn.Parameter(self._ema_w / self._ema_cluster_size.unsqueeze(1))
+        
+        # Loss
+        e_latent_loss = F.mse_loss(quantized.detach(), inputs)
+        loss = self._commitment_cost * e_latent_loss
+        
+        # Straight Through Estimator
+        quantized = inputs + (quantized - inputs).detach()
+        avg_probs = torch.mean(encodings, dim=0)
+        perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
+        
+        # Permute back to [batch_size, num_channels, height, width]
+        return loss, quantized.permute(0, 3, 1, 2).contiguous(), perplexity, encodings, encoding_indices
 
-    @torch.no_grad()
-    def _nearest_code_indices(self, z_e: torch.Tensor) -> torch.Tensor:
-        B, D, H, W = z_e.shape
-        flat = z_e.permute(0, 2, 3, 1).reshape(-1, D)               # [B*H*W, D]
-        x2 = (flat ** 2).sum(dim=1, keepdim=True)                   # [N,1]
-        e2 = (self.embedding.weight ** 2).sum(dim=1)                # [K]
-        x_e = flat @ self.embedding.weight.t()                      # [N,K]
-        distances = x2 + e2.unsqueeze(0) - 2 * x_e                  # [N,K]
-        indices = torch.argmin(distances, dim=1)                    # [N]
-        return indices.view(B, H, W)                                # [B,H,W]
-
-    def forward(self, z_e: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-        B, D, H, W = z_e.shape
-        with torch.no_grad():
-            indices = self._nearest_code_indices(z_e)               # [B,H,W]
-
-        # quantized embeddings at those indices
-        z_q = self.embedding(indices).permute(0, 3, 1, 2).contiguous()  # [B,D,H,W]
-
-        # straight-through estimator
-        z_q_st = z_e + (z_q - z_e).detach()
-
-        # losses
-        codebook_loss = F.mse_loss(z_q, z_e.detach())
-        commitment_loss = self.beta * F.mse_loss(z_e, z_q.detach())
-
-        # perplexity (effective code usage)
-        with torch.no_grad():
-            one_hot = F.one_hot(indices, num_classes=self.codebook_size).float()  # [B,H,W,K]
-            avg_probs = one_hot.mean(dim=(0, 1, 2)) + 1e-10
-            perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs)))
-
-        aux = {
-            "codebook": codebook_loss,
-            "commitment": commitment_loss,
-            "perplexity": perplexity,
-            "indices": indices,
-        }
-        return z_q_st, indices, aux
+    @property
+    def embedding(self):
+        return self._embedding
 
 
-# -------------------------
-# Main VQ-VAE module
-# -------------------------
 class VQVAE(nn.Module):
-    """
-    Vector-Quantized VAE suitable for BDH prior training.
-      - For 32x32 images with downsample_factor=4, code grid is 8x8 (T=64).
-      - encode(x)  -> [B,Hc,Wc] int codes
-      - decode(ids)-> [B,C,H,W] images
-      - forward(x) -> (recon, loss_dict, indices)
-    """
-    def __init__(
-        self,
-        codebook_size: int = 512,
-        embed_dim: int = 256,
-        encoder_channels: int = 128,
-        decoder_channels: int = 128,
-        beta: float = 0.25,
-        downsample_factor: int = 4,
-        in_channels: int = 3,
-        out_channels: int = 3,
-    ):
-        super().__init__()
-        self.codebook_size = codebook_size
-        self.embed_dim = embed_dim
-        self.downsample_factor = downsample_factor
+    def __init__(self, config):
+        super(VQVAE, self).__init__()
+        
+        # Access attributes safely from the config Namespace
+        # Casting to int explicitly to prevent errors
+        num_hiddens = int(config.num_hiddens)
+        num_residual_hiddens = int(config.num_residual_hiddens)
+        num_residual_layers = int(config.num_residual_layers)
+        embedding_dim = int(config.embedding_dim)
+        num_embeddings = int(config.num_embeddings)
+        commitment_cost = float(config.commitment_cost)
+        decay = float(config.decay)
+        
+        self._encoder = Encoder(3, num_hiddens,
+                                num_residual_layers, 
+                                num_residual_hiddens)
+        
+        self._pre_vq_conv = nn.Conv2d(in_channels=num_hiddens, 
+                                      out_channels=embedding_dim,
+                                      kernel_size=1, 
+                                      stride=1)
+        
+        self._vq_vae = VectorQuantizerEMA(num_embeddings, embedding_dim, 
+                                          commitment_cost, decay)
+        
+        self._decoder = Decoder(embedding_dim,
+                                num_hiddens, 
+                                num_residual_layers, 
+                                num_residual_hiddens)
 
-        self.encoder = Encoder(
-            in_channels=in_channels,
-            channels=encoder_channels,
-            embed_dim=embed_dim,
-            downsample_factor=downsample_factor,
-        )
-        self.vq = VectorQuantizer(codebook_size=codebook_size, embed_dim=embed_dim, beta=beta)
-        self.decoder = Decoder(
-            out_channels=out_channels,
-            channels=decoder_channels,
-            embed_dim=embed_dim,
-            upsample_factor=downsample_factor,
-        )
+    def forward(self, x):
+        z = self._encoder(x)
+        z = self._pre_vq_conv(z)
+        loss, quantized, perplexity, _, _ = self._vq_vae(z)
+        x_recon = self._decoder(quantized)
+        return x_recon, loss, perplexity
 
-    @torch.no_grad()
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Return discrete code indices grid [B,Hc,Wc] (dtype long).
-        """
-        z_e = self.encoder(x)
-        _, indices, _ = self.vq(z_e)  # only need indices
-        return indices
-
-    def decode(self, indices: torch.Tensor) -> torch.Tensor:
-        """
-        Decode from code indices [B,Hc,Wc] to image [B,C,H,W].
-        """
-        z_q = self.vq.embedding(indices).permute(0, 3, 1, 2).contiguous()  # [B,D,Hc,Wc]
-        x_hat = self.decoder(z_q)
-        return x_hat
-
-    def forward(self, x: torch.Tensor):
-        """
-        Returns:
-            recon: [B,C,H,W]
-            loss_dict: {"recon","codebook","commitment","perplexity"}
-            indices: [B,Hc,Wc] int64
-        """
-        z_e = self.encoder(x)                           # [B,D,Hc,Wc]
-        z_q, indices, aux = self.vq(z_e)                # [B,D,Hc,Wc], [B,Hc,Wc]
-        x_hat = self.decoder(z_q)                       # [B,C,H,W]
-
-        # MSE recon loss (assumes inputs in [0,1])
-        recon_loss = F.mse_loss(x_hat, x)
-
-        loss_dict = {
-            "recon": recon_loss,
-            "codebook": aux["codebook"],
-            "commitment": aux["commitment"],
-            "perplexity": aux["perplexity"],
-        }
-        return x_hat, loss_dict, indices
-
-
-# -------------------------
-# Tiny sanity check
-# -------------------------
-if __name__ == "__main__":
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.manual_seed(0)
-    model = VQVAE(codebook_size=512, embed_dim=256, downsample_factor=4).to(device)
-    x = torch.rand(4, 3, 32, 32, device=device)  # fake CIFAR batch in [0,1]
-    x_hat, losses, idx = model(x)
-    total = losses["recon"] + losses["codebook"] + losses["commitment"]
-    print("shapes:", x.shape, x_hat.shape, idx.shape)
-    print("perplexity:", float(losses["perplexity"]))
-    print("loss:", float(total.detach().cpu()))
+    def encode(self, x):
+        """Returns encodings (indices) for given input"""
+        z = self._encoder(x)
+        z = self._pre_vq_conv(z)
+        loss, quantized, perplexity, encodings, indices = self._vq_vae(z)
+        return loss, quantized, perplexity, encodings, indices
+    
+    @property
+    def quantizer(self):
+        # For compatibility with sampling script
+        return self._vq_vae
+    
+    @property
+    def decoder(self):
+        return self._decoder

@@ -1,120 +1,136 @@
-# eval_metrics.py (FID, IS, KID + model stats)
+# eval_metrics.py  (DO NOT MODIFY ANYTHING)
 import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from datasets import load_from_disk
+from torchvision import transforms
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.inception import InceptionScore
 from torchmetrics.image.kid import KernelInceptionDistance
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
+
 from models.vqvae import VQVAE
 from models.priors.pixelsnail import PixelSNAILPrior
-import torch.nn.functional as F
+from utils import load_config, count_parameters
+from tqdm import tqdm
+import inspect
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# ---- constants ----
-B, Hc, Wc, K_code = 64, 8, 8, 512
+# Latent grid settings
+Hc, Wc = 16, 16
 T = Hc * Wc
-K_vocab = K_code + 1
-bos_id = K_code
-ENABLE_KID = True
+num_embeddings = 1024
+K_vocab = num_embeddings + 1
+bos_id = num_embeddings
 
-# ---- helpers ----
-def to_u8(x: torch.Tensor) -> torch.Tensor:
-    return (x.clamp(0, 1) * 255.0).to(torch.uint8)
+print(f"Eval using latent grid: {Hc}×{Wc} (T={T})")
+print(f"Vocab size={K_vocab}, BOS ID={bos_id}")
 
-def generate_without_bos(prior, bos, steps, bos_id, temperature=1.0, top_k=None):
-    ids = bos
-    for _ in range(steps):
-        idx_cond = ids[:, -getattr(prior, "block_size", ids.size(1)):]
-        logits = prior(idx_cond)[:, -1, :] / max(1e-8, temperature)
-        logits[:, bos_id] = float("-inf")
-        if top_k is not None:
-            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-            logits[logits < v[:, [-1]]] = float("-inf")
-        probs = F.softmax(logits, dim=-1)
-        next_id = torch.multinomial(probs, 1)
-        ids = torch.cat([ids, next_id], dim=1)
-    return ids[:, 1:]
+# Load real images
+REAL_PATH = "data/ffhq64_local"
+print(f"Loading real FFHQ images from: {REAL_PATH}")
 
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+ds = load_from_disk(REAL_PATH)
+tfm = transforms.Compose([transforms.ToTensor()])
 
-def measure_memory(fn, *args, **kwargs):
-    torch.cuda.reset_peak_memory_stats()
-    with torch.no_grad():
-        _ = fn(*args, **kwargs)
-    return torch.cuda.max_memory_allocated() / (1024**2)
+def collate(examples):
+    imgs = [tfm(x["image"].convert("RGB")) for x in examples]
+    return torch.stack(imgs)
 
-# ---- dataset ----
-tfm = transforms.ToTensor()
-real = datasets.CIFAR10("./data", train=False, download=True, transform=tfm)
-real_loader = DataLoader(real, batch_size=B, shuffle=False, num_workers=2, pin_memory=True)
+real_loader = DataLoader(ds, batch_size=32, shuffle=False, collate_fn=collate)
 
-# ---- models ----
-vq = VQVAE(codebook_size=K_code, embed_dim=256, downsample_factor=4).to(device).eval()
-vq.load_state_dict(torch.load("checkpoints/vqvae.pt", map_location=device))
-
-prior = PixelSNAILPrior(
-    vocab_size=K_vocab,
-    d_model=256,
-    n_layer=12,
-    block_size=T+1,
-    n_residual=2,
-    dropout=0.1,
-    tie_embeddings=True,
-).to(device).eval()
-prior.load_state_dict(torch.load("checkpoints/pixelsnail_prior.pt", map_location=device))
-
-# ---- metrics ----
+# Metrics
 fid = FrechetInceptionDistance(feature=2048).to(device)
 iscore = InceptionScore().to(device)
-kid = KernelInceptionDistance(subset_size=50).to(device) if ENABLE_KID else None
+kid = KernelInceptionDistance(subset_size=50).to(device)
 
-# ---- real data updates ----
-for x, _ in real_loader:
-    x_u8 = to_u8(x).to(device, non_blocking=True)
-    fid.update(x_u8, real=True)
-    if ENABLE_KID:
-        kid.update(x_u8, real=True)
+for batch in tqdm(real_loader, desc="Real Images"):
+    batch = (batch * 255).byte().to(device)
+    fid.update(batch, real=True)
+    kid.update(batch, real=True)
+    iscore.update(batch)
 
-# ---- generate samples ----
-target = 10000
-seen = 0
-while seen < target:
-    b = min(B, target - seen)
-    bos = torch.full((b, 1), bos_id, dtype=torch.long, device=device)
-    codes_seq = generate_without_bos(prior, bos, steps=T, bos_id=bos_id, temperature=1.0, top_k=50)
-    codes = codes_seq.view(b, Hc, Wc).clamp(0, K_code - 1)
+vq_conf = load_config("configs/vqvae_config.yaml")
+vq = VQVAE(vq_conf).to(device)
+vq.load_state_dict(torch.load("checkpoints/vqvae_best.pt", map_location=device))
+vq.eval()
 
-    with torch.no_grad():
-        imgs = vq.decode(codes).clamp(0, 1)
-    imgs_u8 = to_u8(imgs).to(device)
+p_conf = load_config("configs/pixelsnail.yaml")
 
+# KEEP ONLY VALID KEYS
+valid_keys = inspect.signature(PixelSNAILPrior).parameters.keys()
+prior_kwargs = {k: v for k, v in p_conf.__dict__.items() if k in valid_keys}
+
+# Force correct geometry + vocab
+prior_kwargs["vocab_size"] = K_vocab
+prior_kwargs["height"] = Hc
+prior_kwargs["width"] = Wc
+
+
+prior = PixelSNAILPrior(**prior_kwargs).to(device)
+prior.load_state_dict(torch.load("checkpoints/pixelsnail_prior.pt", map_location=device))
+prior.eval()
+
+# Sampling function
+@torch.no_grad()
+def sample_codes(batch=32, temperature=1.0, top_k=50):
+    bos = torch.full((batch, 1), bos_id, dtype=torch.long, device=device)
+    ids = bos
+    for _ in range(T):
+        cond = ids[:, -prior.block_size:]
+        logits = prior(cond)[:, -1, :] / temperature
+        logits[:, bos_id] = float("-inf")
+        if top_k:
+            top_vals, _ = torch.topk(logits, k=min(top_k, logits.size(-1)))
+            logits[logits < top_vals[:, [-1]]] = float("-inf")
+        probs = F.softmax(logits, dim=-1)
+        nxt = torch.multinomial(probs, 1)
+        ids = torch.cat([ids, nxt], dim=1)
+    return ids[:, 1:].view(batch, Hc, Wc)
+
+
+TARGET_FAKE = 2000
+
+for _ in tqdm(range(TARGET_FAKE // 32), desc="Fake Batches"):
+    codes = sample_codes(batch=32)
+    emb = vq.quantizer.embedding(codes).permute(0, 3, 1, 2)
+    imgs = vq.decoder(emb).clamp(0, 1)
+    imgs_u8 = (imgs * 255).byte().to(device)
     fid.update(imgs_u8, real=False)
+    kid.update(imgs_u8, real=False)
     iscore.update(imgs_u8)
-    if ENABLE_KID:
-        kid.update(imgs_u8, real=False)
 
-    seen += b
-
-# ---- results ----
+# Results
 print("\n--- Evaluation Metrics ---")
 print(f"FID: {float(fid.compute()):.3f}")
-if ENABLE_KID:
-    kid_mean, kid_std = kid.compute()
-    print(f"KID: {float(kid_mean):.3f} +/- {float(kid_std):.3f}")
-m, s = iscore.compute()
-print(f"Inception Score: {float(m):.3f} +/- {float(s):.3f}")
+kid_mean, kid_std = kid.compute()
+print(f"KID: {float(kid_mean):.5f} ± {float(kid_std):.5f}")
+is_mean, is_std = iscore.compute()
+print(f"Inception Score: {float(is_mean):.3f} ± {float(is_std):.3f}")
 
-# ---- model stats ----
+# MODEL STATISTICS (PARAMS + MEMORY)
+def measure_memory(model, sample_input):
+    torch.cuda.reset_peak_memory_stats()
+    with torch.no_grad():
+        _ = model(sample_input)
+    mem = torch.cuda.max_memory_allocated() / (1024**2)
+    torch.cuda.reset_peak_memory_stats()
+    return mem
+
 print("\n--- Model Stats ---")
-prior_params = count_parameters(prior)
-print(f"PixelSNAIL Prior Parameters: {prior_params/1e6:.2f}M")
 
+# Parameter counts
+vq_params = count_parameters(vq)
+prior_params = count_parameters(prior)
+
+print(f"VQ-VAE Parameters:       {vq_params:.2f}M")
+print(f"PixelSNAIL Parameters:   {prior_params:.2f}M")
+
+# GPU memory footprint
 if torch.cuda.is_available():
-    sample_codes = torch.randint(0, K_code, (1, Hc, Wc), device=device)
-    bos = torch.full((1, 1), K_code, dtype=torch.long, device=device)
-    prior_mem = measure_memory(prior, bos)
-    print(f"PixelSNAIL Prior Memory Footprint: {prior_mem:.1f} MB")
+    example = torch.randint(0, K_vocab, (1, T), device=device)
+    prior_mem = measure_memory(prior, example)
+    print(f"PixelSNAIL Memory Footprint: {prior_mem:.1f} MB")
 else:
-    print("CUDA not available — skipping memory footprint measurement.")
+    print("CUDA not available — cannot compute memory footprint.")
+

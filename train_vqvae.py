@@ -1,57 +1,118 @@
-# train_vqvae.py
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+from torchvision import transforms, utils
 from models.vqvae import VQVAE
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
-import torch, torch.optim as optim
-from utils import set_seed, save_checkpoint, count_parameters
+from utils import load_config, Logger  # Import Logger
+import os
 import time
+import argparse
+from tqdm import tqdm
+# In train_vqvae.py
 
-set_seed(42)
+from datasets import load_from_disk  # Change import
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-tfm = transforms.ToTensor()
-train = datasets.CIFAR10("./data", train=True, download=True, transform=tfm)
-loader = DataLoader(train, batch_size=128, shuffle=True, num_workers=4)
 
-model = VQVAE(codebook_size=512, embed_dim=256, downsample_factor=4).to(device)
-print("Params:", count_parameters(model), "M")
+def get_data_loader(batch_size):
+    print("Loading FFHQ-64 from local disk...")
 
-opt = optim.Adam(model.parameters(), lr=2e-4)
-total_training_time = 0
-epoch_times = []
-for epoch in range(50): 
-    epoch_start_time = time.time()
-    epoch_loss = 0
-    epoch_recon = 0
-    epoch_codebook = 0
-    epoch_commitment = 0 
-    num_batches = 0 
-    for x, _ in loader:
-        x = x.to(device)
-        x_hat, loss_dict, _ = model(x)
-        loss = loss_dict["recon"] + loss_dict["codebook"] + loss_dict["commitment"]
-        opt.zero_grad(); loss.backward(); opt.step()
-        epoch_loss += loss.item()
-        epoch_recon += loss_dict["recon"].item()
-        epoch_codebook += loss_dict["codebook"].item()
-        epoch_commitment += loss_dict["commitment"].item()
-        num_batches += 1
-    epoch_time = time.time() - epoch_start_time
-    epoch_times.append(epoch_time)
-    total_training_time += epoch_time
-    avg_loss = epoch_loss / num_batches
-    avg_recon = epoch_recon / num_batches
-    avg_codebook = epoch_codebook / num_batches
-    avg_commitment = epoch_commitment / num_batches
-    print(f"Epoch {epoch} | Loss: {avg_loss:.4f} (recon: {avg_recon:.4f}, "
-          f"codebook: {avg_codebook:.4f}, commit: {avg_commitment:.4f}) | "
-          f"time={epoch_time:.2f}s | total={total_training_time/60:.1f}min")
-    if (epoch + 1) % 10 == 0:
-        save_checkpoint(model, f"checkpoints/vqvae_epoch{epoch+1}.pt")
+    # FIX: Load from local path
+    try:
+        dataset = load_from_disk("data/ffhq64_local")
+    except:
+        print("Local dataset not found, downloading now...")
+        from datasets import load_dataset
+        dataset = load_dataset("Dmini/FFHQ-64x64", split="train")
+        dataset.save_to_disk("data/ffhq64_local")
 
-save_checkpoint(model, "checkpoints/vqvae.pt")
-print("Saved VQVAE checkpoint.")
+    # Remove .with_format("torch") if it causes issues with transforms,
+    # but usually good for speed.
 
-avg_epoch_time = sum(epoch_times) / len(epoch_times)
-print(f"Total training time: {total_training_time/60:.2f} minutes ({total_training_time/3600:.2f} hours)")
-print(f"Average epoch time: {avg_epoch_time:.2f} seconds")
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+
+    def collate_fn(examples):
+        valid_imgs = [ex["image"].convert("RGB") for ex in examples]
+        images = [transform(img) for img in valid_imgs]
+        return torch.stack(images)
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        collate_fn=collate_fn,
+        num_workers=4,  # Now this works perfectly!
+        shuffle=True,  # Important for VQ-VAE
+        pin_memory=True
+    )
+    return dataloader
+
+
+def train():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='configs/vqvae_config.yaml')
+    args = parser.parse_args()
+
+    conf = load_config(args.config)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Create dirs
+    os.makedirs("checkpoints", exist_ok=True)
+    os.makedirs("results", exist_ok=True)
+
+    # Initialize Logger
+    logger = Logger("logs/vqvae_train.log")
+    logger.log(f"Starting VQ-VAE training on {device} with config: {conf}")
+
+    model = VQVAE(conf).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=conf.learning_rate)
+
+    loader = get_data_loader(conf.batch_size)
+    iterator = iter(loader)
+
+    start_time = time.time()
+
+    for i in range(conf.max_iters):
+        try:
+            images = next(iterator)
+        except StopIteration:
+            iterator = iter(loader)
+            images = next(iterator)
+
+        images = images.to(device)
+
+        optimizer.zero_grad()
+        reconstruction, quantization_loss, perplexity = model(images)
+
+        # MSE Loss
+        recon_loss = F.mse_loss(reconstruction, images)
+        loss = recon_loss + conf.commitment_cost * quantization_loss
+
+        loss.backward()
+        optimizer.step()
+
+        if i % conf.log_interval == 0:
+            elapsed = time.time() - start_time
+            steps_per_sec = conf.log_interval / elapsed
+            logger.log(f"Iter {i}: Loss={loss.item():.4f} | Recon={recon_loss.item():.4f} | "
+                       f"Q={quantization_loss.item():.4f} | PPL={perplexity.item():.2f} | "
+                       f"Speed={steps_per_sec:.2f} it/s")
+            start_time = time.time()
+
+        if i % conf.save_interval == 0:
+            torch.save(model.state_dict(), "checkpoints/vqvae_best.pt")
+            logger.log(f"Saved checkpoint to checkpoints/vqvae_best.pt")
+
+            # Save visual sample
+            utils.save_image(
+                torch.cat([images[:8], reconstruction[:8]], dim=0),
+                f"results/recon_{i}.png",
+                nrow=8, normalize=True, value_range=(-1, 1)
+            )
+
+    logger.close()
+
+
+if __name__ == "__main__":
+    train()

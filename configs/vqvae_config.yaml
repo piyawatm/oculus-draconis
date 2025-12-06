@@ -1,19 +1,44 @@
-# Training settings for VQ-VAE stage
-data:
-  dataset: cifar10
-  root: ./data
-  image_size: 32
-  batch_size: 128
-  num_workers: 4
+# # Training settings for VQ-VAE stage
+
+# data:
+#   dataset: cifar10
+#   root: ./data
+#   image_size: 32
+#   batch_size: 128
+#   num_workers: 4
 
 model:
-  codebook_size: 512
-  embed_dim: 256
-  downsample_factor: 4
-  beta: 0.25
+  in_channels: 3
+  num_hiddens: 128
+  num_residual_hiddens: 32
+  num_residual_layers: 2
+  
+  # Increased capacity for faces
+  embedding_dim: 256    # Was 64. Crucial for feature richness.
+  num_embeddings: 1024  # Was 512. More "words" for the model to use.
+  
+  commitment_cost: 0.25
+  decay: 0.99           # EMA Decay
 
-train:
-  epochs: 50
-  lr: 2e-4
-  seed: 42
-  save_path: checkpoints/vqvae.pt
+training:
+  batch_size: 128
+  learning_rate: 0.001
+  max_iters: 50000      # Faces need fewer iters than ImageNet
+  log_interval: 100
+  save_interval: 1000
+
+
+# model:
+#   codebook_size: 512        # keep same for now
+#   embed_dim: 256            # keep same for now
+#   downsample_factor: 4      # 32x32 -> 8x8
+#   beta: 0.25                # commitment weight
+#   encoder_channels: 192     # NEW: matches updated vqvae.py default
+#   decoder_channels: 192     # NEW: matches updated vqvae.py default
+
+# train:
+#   epochs: 100               # was 50; let it fully converge
+#   lr: 3e-4                  # was 2e-4; a bit more aggressive with cosine schedule
+#   seed: 42
+#   save_path: checkpoints/vqvae.pt
+#   log_path: logs/vqvae_train_log.txt   # optional if you want logging to file
