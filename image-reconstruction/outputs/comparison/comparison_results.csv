@@ -1,0 +1,4 @@
+model,psnr_mean,psnr_std,lpips_mean,lpips_std,mse_mean,codebook_usage,num_params
+vqvae,25.4233,2.188,0.0356,0.0031,0.013,0.8398,1269443
+vqvae2,26.1108,2.4169,0.0282,0.0026,0.0113,0.8652,6335363
+bdh_vqvae,25.4559,2.4651,0.0441,0.0041,0.0133,0.5254,8292103
