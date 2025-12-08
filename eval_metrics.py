@@ -12,6 +12,9 @@ from torch_fidelity import calculate_metrics
 
 from models.vqvae import VQVAE
 from models.priors.bdh import BDHPrior
+from models.priors.pixelcnn import PixelCNNPrior
+from models.priors.pixelsnail import PixelSNAILPrior
+from models.priors.maskgit import MaskGITPrior
 from train_vqvae import get_data_loader
 from utils import Logger
 
@@ -29,6 +32,22 @@ def load_conf(path):
         if 'training' in raw: raw.update(raw['training'])
         return Namespace(**raw)
 
+def get_prior_class(config):
+    """Factory function to get the appropriate prior class based on config."""
+    model_name = getattr(config, 'name', None) or getattr(config, 'type', None)
+    
+    if model_name == 'PixelCNNPrior' or 'pixelcnn' in str(model_name).lower():
+        return PixelCNNPrior
+    elif model_name == 'PixelSNAILPrior' or 'pixelsnail' in str(model_name).lower():
+        return PixelSNAILPrior
+    elif model_name == 'MaskGITPrior' or 'maskgit' in str(model_name).lower():
+        return MaskGITPrior
+    elif model_name == 'BDHPrior' or 'bdh' in str(model_name).lower():
+        return BDHPrior
+    else:
+        # Default to BDH for backward compatibility
+        return BDHPrior
+
 def load_state_dict_safe(model, ckpt_path):
     """Loads state dict handling torch.compile prefix."""
     print(f"Loading checkpoint from {ckpt_path}")
@@ -43,7 +62,7 @@ def load_state_dict_safe(model, ckpt_path):
     model.load_state_dict(new_state_dict)
     return model
 
-def generate_fake_images(logger, num_imgs=2000, batch_size=50):
+def generate_fake_images(logger, num_imgs=2000, batch_size=50, prior_config_path=None, prior_checkpoint_path=None):
     if os.path.exists(FAKE_DIR): shutil.rmtree(FAKE_DIR)
     os.makedirs(FAKE_DIR)
     
@@ -51,19 +70,45 @@ def generate_fake_images(logger, num_imgs=2000, batch_size=50):
     
     # Load Models
     v_conf = load_conf("configs/vqvae_config.yaml")
-    p_conf = load_conf("configs/bdh_config.yaml")
+    p_conf = load_conf(prior_config_path or "configs/bdh_config.yaml")
+    
+    # Load sampling config if available
+    with open(prior_config_path or "configs/bdh_config.yaml", 'r') as f:
+        raw_conf = yaml.safe_load(f)
+        if 'sampling' in raw_conf:
+            for k, v in raw_conf['sampling'].items():
+                setattr(p_conf, k, v)
     
     vqvae = VQVAE(v_conf).to(DEVICE)
     # Apply Safe Load
     vqvae = load_state_dict_safe(vqvae, "checkpoints/vqvae_best.pt")
     vqvae.eval()
     
-    prior = BDHPrior(p_conf).to(DEVICE)
+    # Get appropriate prior class and instantiate
+    prior_cls = get_prior_class(p_conf)
+    if prior_cls in (PixelCNNPrior, PixelSNAILPrior, MaskGITPrior):
+        prior = prior_cls(config=p_conf).to(DEVICE)
+    else:
+        prior = prior_cls(p_conf).to(DEVICE)
+    
     # Apply Safe Load
-    prior = load_state_dict_safe(prior, "checkpoints/prior_best.pt")
+    prior_ckpt = prior_checkpoint_path or "checkpoints/prior_best.pt"
+    prior = load_state_dict_safe(prior, prior_ckpt)
     prior.eval()
     
-    bos_token = p_conf.vocab_size - 1
+    # Check if using MaskGIT
+    is_maskgit = prior_cls == MaskGITPrior
+    
+    if is_maskgit:
+        # MaskGIT parameters
+        n_steps = getattr(p_conf, 'n_steps', 8)
+        schedule = getattr(p_conf, 'schedule', 'cosine')
+        sampling_top_k = getattr(p_conf, 'sampling_top_k', 100)
+        temperature = getattr(p_conf, 'temperature', 1.5)
+    else:
+        # Autoregressive parameters
+        bos_token = p_conf.vocab_size - 1
+    
     H = W = int(p_conf.block_size ** 0.5)
     
     count = 0
@@ -71,21 +116,36 @@ def generate_fake_images(logger, num_imgs=2000, batch_size=50):
     
     while count < num_imgs:
         curr_batch = min(batch_size, num_imgs - count)
-        idx = torch.full((curr_batch, 1), bos_token, dtype=torch.long).to(DEVICE)
         
         with torch.no_grad():
-            for _ in range(p_conf.block_size):
-                logits, _ = prior(idx)
-                last_logits = logits[:, -1, :]
-                last_logits[:, bos_token] = float('-inf')
+            if is_maskgit:
+                # MaskGIT: Iterative parallel generation
+                dummy_prefix = torch.zeros((curr_batch, 1), dtype=torch.long).to(DEVICE)
+                codes = prior.generate(
+                    idx=dummy_prefix,
+                    max_new_tokens=p_conf.block_size,
+                    temperature=temperature,
+                    n_steps=n_steps,
+                    schedule=schedule,
+                    sampling_top_k=sampling_top_k,
+                )  # [B, block_size]
+            else:
+                # Autoregressive generation
+                idx = torch.full((curr_batch, 1), bos_token, dtype=torch.long).to(DEVICE)
                 
-                # Optional: Add Temperature/Top-p here if you want better quality fakes
-                # For standard FID, pure sampling is often used, but Top-p=0.9 is fair game.
-                probs = F.softmax(last_logits, dim=-1)
-                next_idx = torch.multinomial(probs, num_samples=1)
-                idx = torch.cat((idx, next_idx), dim=1)
+                for _ in range(p_conf.block_size):
+                    logits, _ = prior(idx)
+                    last_logits = logits[:, -1, :]
+                    last_logits[:, bos_token] = float('-inf')
+                    
+                    probs = F.softmax(last_logits, dim=-1)
+                    next_idx = torch.multinomial(probs, num_samples=1)
+                    idx = torch.cat((idx, next_idx), dim=1)
+                
+                codes = idx[:, 1:].view(curr_batch, H, W)
             
-            codes = idx[:, 1:].view(curr_batch, H, W)
+            # Reshape codes to grid
+            codes = codes.view(curr_batch, H, W)
             
             # Handle VQVAE naming safely
             if hasattr(vqvae, '_vq_vae'):
@@ -130,6 +190,8 @@ def extract_real_images(logger, num_imgs=2000):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_imgs', type=int, default=2000)
+    parser.add_argument('--prior_config', type=str, default=None, help='Path to prior config file')
+    parser.add_argument('--prior_checkpoint', type=str, default=None, help='Path to prior checkpoint')
     args = parser.parse_args()
     
     logger = Logger(LOG_FILE)
@@ -137,7 +199,9 @@ def main():
     
     try:
         extract_real_images(logger, num_imgs=args.num_imgs)
-        generate_fake_images(logger, num_imgs=args.num_imgs)
+        generate_fake_images(logger, num_imgs=args.num_imgs, 
+                           prior_config_path=args.prior_config,
+                           prior_checkpoint_path=args.prior_checkpoint)
         
         logger.log("Calculating FID and KID...")
         fid_score = fid.compute_fid(FAKE_DIR, REAL_DIR)

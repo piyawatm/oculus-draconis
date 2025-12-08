@@ -1,0 +1,29 @@
+# configs/pixelsnail.yaml
+# Training configuration for PixelSNAIL prior on CIFAR-10 VQ-VAE codes
+
+model:
+  name: PixelSNAILPrior
+  vocab_size: 1025           # Match VQ-VAE: 1024 codes + 1 BOS token
+  d_model: 256               # embedding / hidden dimension
+  n_layer: 12                # number of PixelSNAIL blocks
+  height: 16                 # spatial height (16x16 grid for 64x64 images)
+  width: 16                  # spatial width
+  block_size: 256            # Match data shape: 16x16 grid
+  n_residual: 4              # residual layers per block
+  kernel_size: 3
+  dropout: 0.1               # dropout for regularization
+  tie_embeddings: true       # share token embedding with output projection
+  attn_every: 4              # insert attention after every N residuals
+  attn_key_dim: 32
+  attn_val_dim: 64
+  attn_heads: 4
+
+training:  # Changed from 'train:' to 'training:' to match scripts
+  batch_size: 128
+  learning_rate: 1e-4        # Reduced from 3e-4 to 1e-4 for stability
+  max_iters: 100000          # Changed from 'epochs:' to 'max_iters:'
+  warmup_iters: 1000
+  log_interval: 100
+  save_interval: 5000
+  seed: 42
+  save_path: checkpoints/pixelsnail_prior.pt

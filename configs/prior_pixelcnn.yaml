@@ -1,0 +1,18 @@
+model:
+  name: PixelCNNPrior
+  vocab_size: 1025   # Match VQ-VAE: 1024 codes + 1 BOS
+  d_model: 128       # embedding / conv channels
+  n_layers: 15
+  kernel_size: 3
+  block_size: 256    # Match data shape: 16x16 grid (was 64)
+  dropout: 0.1
+
+training:  # Changed from 'train:' to 'training:' to match scripts
+  batch_size: 128
+  learning_rate: 3e-4  # Changed from 'lr:' to 'learning_rate:'
+  max_iters: 100000    # Changed from 'epochs:' to 'max_iters:' (approximate: epochs * batches_per_epoch)
+  warmup_iters: 1000
+  log_interval: 100
+  save_interval: 5000
+  seed: 42
+  save_path: checkpoints/pixelcnn_prior.pt
