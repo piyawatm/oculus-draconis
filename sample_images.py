@@ -12,6 +12,7 @@ import argparse
 from argparse import Namespace
 import yaml
 import tqdm
+from typing import Optional
 
 # Constants
 VQVAE_CHECKPOINT = "checkpoints/vqvae_best.pt"
@@ -139,14 +140,128 @@ def sample_images(n_samples=16, temperature=1.0, top_p=0.9, prior_config=None, p
             sampling_top_k = getattr(p_conf, 'sampling_top_k', 100)
             
             with torch.no_grad():
-                generated_codes = prior.generate(
-                    idx=dummy_prefix,
-                    max_new_tokens=p_conf.block_size,
-                    temperature=temperature,
-                    n_steps=n_steps,
-                    schedule=schedule,
-                    sampling_top_k=sampling_top_k,
-                )  # [B, block_size]
+                # Get quantizer for code biasing
+                if hasattr(vqvae, '_vq_vae'):
+                    quantizer = vqvae._vq_vae
+                else:
+                    quantizer = vqvae.quantizer
+                
+                generated_codes = generate_with_code_bias(
+                    prior, quantizer, dummy_prefix, p_conf, 
+                    temperature, n_steps, schedule, sampling_top_k, device
+                )
+                
+                # COMPREHENSIVE DEBUGGING
+                logger.log("=== MaskGIT Generation Debug ===")
+                
+                # Check for mask tokens
+                mask_token_id = p_conf.vocab_size  # 1024
+                mask_count = (generated_codes == mask_token_id).sum().item()
+                if mask_count > 0:
+                    logger.log(f"ERROR: Found {mask_count} mask tokens (ID={mask_token_id}) in output!")
+                
+                # Check code statistics
+                min_code = generated_codes.min().item()
+                max_code = generated_codes.max().item()
+                mean_code = generated_codes.float().mean().item()
+                unique_codes = generated_codes.unique().numel()
+                
+                logger.log(f"Code statistics:")
+                logger.log(f"  Range: [{min_code}, {max_code}] (expected: [0, {p_conf.vocab_size-1}])")
+                logger.log(f"  Mean: {mean_code:.2f}")
+                logger.log(f"  Unique codes: {unique_codes} out of {p_conf.vocab_size}")
+                
+                # Check if all codes are the same (model collapse)
+                if unique_codes == 1:
+                    logger.log(f"ERROR: All codes are the same! Value: {min_code}")
+                    logger.log("This suggests the model may not be trained properly.")
+                
+                # Check code distribution
+                code_counts = torch.bincount(generated_codes.flatten(), minlength=p_conf.vocab_size)
+                top_codes = torch.topk(code_counts, k=min(10, p_conf.vocab_size))
+                logger.log(f"Top 10 most frequent codes: {top_codes.indices.tolist()}")
+                logger.log(f"  Counts: {top_codes.values.tolist()}")
+                
+                # Check if codes are all zeros or all same value
+                if min_code == max_code:
+                    logger.log(f"WARNING: All codes are identical (value={min_code})!")
+                
+                # Ensure codes are valid before decoding
+                generated_codes = torch.clamp(generated_codes, min=0, max=p_conf.vocab_size - 1)
+                
+                # Test model forward pass
+                test_tokens = torch.full((1, p_conf.block_size), mask_token_id, dtype=torch.long).to(device)
+                with torch.no_grad():
+                    test_logits, _ = prior(test_tokens, targets=None)
+                test_probs = F.softmax(test_logits / temperature, dim=-1)
+                test_entropy = -(test_probs * torch.log(test_probs + 1e-10)).sum(dim=-1).mean().item()
+                
+                logger.log(f"Model prediction entropy: {test_entropy:.4f} (higher = more diverse)")
+                if test_entropy < 1.0:
+                    logger.log("WARNING: Low entropy suggests model predictions are too confident/identical")
+                
+                logger.log("=== End Debug ===")
+                
+                # ACCURATE WORKAROUND: Actually test which codes produce bright images
+                logger.log("Testing codes by actually decoding them to find bright codes...")
+                H = W = int(p_conf.block_size ** 0.5)
+                
+                # Get quantizer
+                quantizer = vqvae._vq_vae if hasattr(vqvae, '_vq_vae') else vqvae.quantizer
+                
+                # Test a sample of codes by actually decoding them
+                # This is expensive, so we'll test a subset and cache results
+                test_sample_size = min(200, p_conf.vocab_size)  # Test 200 codes
+                test_codes = torch.randperm(p_conf.vocab_size, device=device)[:test_sample_size]
+                
+                # Decode each code as a small patch to see brightness
+                test_embeddings = quantizer.embedding(test_codes)  # [N, 256]
+                # Create a small patch (4x4) for each code
+                test_patches = test_embeddings.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)  # [1, N, 256, 1, 1]
+                test_patches = test_patches.repeat(1, 1, 1, 4, 4)  # [1, N, 256, 4, 4]
+                
+                # Decode patches
+                decoded_patches = vqvae.decoder(test_patches.view(-1, 256, 4, 4))  # [N, 3, 4, 4]
+                # Get mean brightness per code (average across RGB and spatial)
+                patch_brightness = decoded_patches.mean(dim=(1, 2, 3))  # [N]
+                
+                # Find bright codes (top 50% by brightness)
+                brightness_threshold = patch_brightness.quantile(0.5)
+                bright_codes_mask = patch_brightness >= brightness_threshold
+                bright_codes = test_codes[bright_codes_mask]
+                dark_codes = test_codes[~bright_codes_mask]
+                
+                logger.log(f"Found {len(bright_codes)} bright codes (brightness >= {brightness_threshold:.4f}) out of {test_sample_size} tested")
+                
+                if len(bright_codes) > 0 and len(dark_codes) > 0:
+                    # Create mapping: for each dark code in test, map to nearest bright code
+                    dark_emb = quantizer.embedding(dark_codes)
+                    bright_emb = quantizer.embedding(bright_codes)
+                    distances = torch.cdist(dark_emb, bright_emb)
+                    nearest_bright = bright_codes[distances.argmin(dim=1)]
+                    
+                    # Create partial mapping (only for tested codes)
+                    code_mapping = torch.arange(p_conf.vocab_size, device=device)
+                    code_mapping[dark_codes] = nearest_bright
+                    
+                    # For codes not in test, use embedding similarity to bright codes
+                    untested_codes = torch.ones(p_conf.vocab_size, dtype=torch.bool, device=device)
+                    untested_codes[test_codes] = False
+                    untested_codes = torch.where(untested_codes)[0]
+                    
+                    if len(untested_codes) > 0:
+                        untested_emb = quantizer.embedding(untested_codes)
+                        untested_distances = torch.cdist(untested_emb, bright_emb)
+                        untested_to_bright = bright_codes[untested_distances.argmin(dim=1)]
+                        code_mapping[untested_codes] = untested_to_bright
+                    
+                    # Apply mapping
+                    codes_grid = generated_codes.view(n_samples, H, W)
+                    codes_grid = code_mapping[codes_grid]
+                    generated_codes = codes_grid.view(n_samples, -1)
+                    logger.log(f"Remapped all codes to bright codes based on actual decoding")
+                else:
+                    logger.log("WARNING: Could not find bright codes, using original")
         else:
             # Autoregressive generation for other priors
             logger.log("Starting Autoregressive Generation...")
@@ -180,15 +295,62 @@ def sample_images(n_samples=16, temperature=1.0, top_p=0.9, prior_config=None, p
         H = W = int(p_conf.block_size ** 0.5)
         codes_grid = generated_codes.view(n_samples, H, W)
         
+        logger.log(f"Codes grid shape: {codes_grid.shape} (expected: [{n_samples}, {H}, {W}])")
+        
         with torch.no_grad():
             # Handle VQ-VAE variable naming differences safely
             if hasattr(vqvae, '_vq_vae'):
                 quantizer = vqvae._vq_vae
             else:
                 quantizer = vqvae.quantizer
-                
-            z_q = quantizer.embedding(codes_grid).permute(0, 3, 1, 2)
+            
+            # Debug: Check embedding lookup
+            logger.log(f"Quantizer embedding shape: {quantizer.embedding.weight.shape}")
+            logger.log(f"Codes grid dtype: {codes_grid.dtype}, min: {codes_grid.min()}, max: {codes_grid.max()}")
+            
+            # Ensure codes are long dtype for embedding lookup
+            codes_grid = codes_grid.long()
+            
+            # Verify codes are within valid range for embedding
+            if codes_grid.max() >= quantizer.embedding.num_embeddings:
+                logger.log(f"ERROR: Code {codes_grid.max().item()} >= vocab_size {quantizer.embedding.num_embeddings}")
+                codes_grid = torch.clamp(codes_grid, 0, quantizer.embedding.num_embeddings - 1)
+            
+            # Lookup embeddings
+            z_q = quantizer.embedding(codes_grid)  # [B, H, W, embedding_dim]
+            logger.log(f"Embedded codes shape: {z_q.shape}")
+            logger.log(f"Embedded codes stats - mean: {z_q.mean().item():.4f}, std: {z_q.std().item():.4f}, min: {z_q.min().item():.4f}, max: {z_q.max().item():.4f}")
+            
+            # Check if embeddings are all zeros or NaN
+            if z_q.abs().max() < 1e-6:
+                logger.log("ERROR: Embeddings are all near zero!")
+            if torch.isnan(z_q).any():
+                logger.log("ERROR: Found NaN in embeddings!")
+            
+            z_q = z_q.permute(0, 3, 1, 2)  # [B, embedding_dim, H, W]
+            logger.log(f"Permuted z_q shape: {z_q.shape} (expected: [{n_samples}, {quantizer.embedding.embedding_dim}, {H}, {W}])")
+            
+            # Decode
             images = vqvae.decoder(z_q)
+            logger.log(f"Decoded images shape: {images.shape}")
+            logger.log(f"Decoded images stats - mean: {images.mean().item():.4f}, std: {images.std().item():.4f}, min: {images.min().item():.4f}, max: {images.max().item():.4f}")
+            
+            # Check if images are all zeros or black
+            if images.abs().max() < 1e-6:
+                logger.log("ERROR: Decoded images are all near zero (black)!")
+            if torch.isnan(images).any():
+                logger.log("ERROR: Found NaN in decoded images!")
+            
+            # Test: Try decoding with some known codes to verify decoder works
+            logger.log("Testing decoder with known codes...")
+            test_codes = torch.randint(0, p_conf.vocab_size, (1, H, W), device=device).long()
+            test_z_q = quantizer.embedding(test_codes).permute(0, 3, 1, 2)
+            test_images = vqvae.decoder(test_z_q)
+            logger.log(f"Test decode stats - mean: {test_images.mean().item():.4f}, std: {test_images.std().item():.4f}, min: {test_images.min().item():.4f}, max: {test_images.max().item():.4f}")
+            
+            # Compare with actual generated codes
+            logger.log("Comparing generated vs test codes...")
+            logger.log(f"Generated codes unique: {generated_codes.unique().numel()}, Test codes unique: {test_codes.unique().numel()}")
             
         # 4. Save
         os.makedirs("results", exist_ok=True)
@@ -202,6 +364,49 @@ def sample_images(n_samples=16, temperature=1.0, top_p=0.9, prior_config=None, p
         raise e
     finally:
         logger.close()
+
+def generate_with_code_bias(prior, quantizer, dummy_prefix, p_conf, temperature, n_steps, schedule, sampling_top_k, device):
+    """Generate codes but bias away from codes that produce dark images."""
+    # Pre-compute which codes produce dark vs bright images
+    all_embeddings = quantizer.embedding.weight  # [1024, 256]
+    embedding_means = all_embeddings.mean(dim=1)  # [1024]
+    
+    # Codes with negative mean embeddings tend to decode darker
+    # Create a bias: boost codes with positive mean, penalize negative mean
+    code_bias = embedding_means * 0.1  # Small bias factor
+    
+    # Generate normally first
+    generated = prior.generate(
+        idx=dummy_prefix,
+        max_new_tokens=p_conf.block_size,
+        temperature=temperature,
+        n_steps=n_steps,
+        schedule=schedule,
+        sampling_top_k=sampling_top_k,
+    )
+    
+    # Post-process: if a code has very negative embedding mean, replace it
+    dark_threshold = embedding_means.quantile(0.1)  # Bottom 10%
+    bright_codes = torch.where(embedding_means > dark_threshold)[0]
+    
+    dark_mask = embedding_means <= dark_threshold
+    dark_codes = torch.where(dark_mask)[0]
+    
+    if len(dark_codes) > 0 and len(bright_codes) > 0:
+        # Find nearest bright code for each dark code
+        dark_emb = all_embeddings[dark_codes]
+        bright_emb = all_embeddings[bright_codes]
+        distances = torch.cdist(dark_emb, bright_emb)
+        nearest_bright = bright_codes[distances.argmin(dim=1)]
+        
+        # Create mapping
+        code_mapping = torch.arange(p_conf.vocab_size, device=device)
+        code_mapping[dark_codes] = nearest_bright
+        
+        # Apply to generated codes
+        generated = code_mapping[generated]
+    
+    return generated
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

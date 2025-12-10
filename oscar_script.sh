@@ -3,11 +3,11 @@
 #!/bin/bash
 #SBATCH -p gpu
 #SBATCH --constraint=geforce3090|quadrortx|titanrtx  # Request ONLY the best cards in the free pool
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH -n 1                 # 1 Task (Python script)
 #SBATCH -c 10                # 10 CPU cores (Near your 12-core limit, leaves buffer)
 #SBATCH --mem=64G            # Double your memory (Safe limit, well below 192G max)
-#SBATCH -t 15:00:00           # (Max is 48 hours for 2 GPUs if you need longer)
+#SBATCH -t 00:05:00           # (Max is 48 hours for 2 GPUs if you need longer)
 #SBATCH -J optimized_job
 #SBATCH -o output_%j.txt
 
@@ -36,6 +36,6 @@ nvidia-smi
 # python eval_metrics.py --prior_config configs/prior_pixelsnail.yaml
 
 # MaskGIT Prior
-python train_prior.py --config configs/prior_maskgit.yaml
-# python sample_images.py --config configs/prior_maskgit.yaml
-# python eval_metrics.py --prior_config configs/prior_maskgit.yaml
+# python train_prior.py --config configs/prior_maskgit.yaml
+python sample_images.py --config configs/prior_maskgit.yaml
+python eval_metrics.py --prior_config configs/prior_maskgit.yaml
