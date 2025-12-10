@@ -17,27 +17,68 @@ The image generation pipeline has 5 steps:
 ## Running
 
 ### Step 1: Train VQ-VAE
-python train_vqvae.py### Step 2: Extract codesh
-python extract_codes.py### Step 3: Train prior
+
+`python train_vqvae.py`
+
+### Step 2: Extract codesh
+
+`python extract_codes.py`
+
+### Step 3: Train prior
 
 For BDH prior:
-python train_prior.py --config configs/prior_bdh.yamlFor MaskGIT prior:
-python train_prior.py --config configs/prior_maskgit.yamlFor PixelCNN prior:
-python train_prior.py --config configs/prior_pixelcnn.yamlFor PixelSNAIL prior:
-python train_prior.py --config configs/prior_pixelsnail.yaml### Step 4: Sample images
 
-For BDH prior:
-python sample_images.py --config configs/prior_bdh.yaml
+`python train_prior.py --config configs/prior_bdh.yaml`
+
 For MaskGIT prior:
-python sample_images.py --config configs/prior_maskgit.yamlFor PixelCNN prior:
-python sample_images.py --config configs/prior_pixelcnn.yamlFor PixelSNAIL prior:
-python sample_images.py --config configs/prior_pixelsnail.yaml### Step 5: Evaluate
+
+`python train_prior.py --config configs/prior_maskgit.yaml`
+
+For PixelCNN prior:
+
+`python train_prior.py --config configs/prior_pixelcnn.yaml`
+
+For PixelSNAIL prior:
+
+`python train_prior.py --config configs/prior_pixelsnail.yaml`
+
+### Step 4: Sample images
 
 For BDH prior:
-python eval_metrics.py --prior_config configs/prior_bdh.yamlFor MaskGIT prior:
-python eval_metrics.py --prior_config configs/prior_maskgit.yamlFor PixelCNN prior:
-python eval_metrics.py --prior_config configs/prior_pixelcnn.yamlFor PixelSNAIL prior:
-python eval_metrics.py --prior_config configs/prior_pixelsnail.yaml## SLURM/Cluster
+
+`python sample_images.py --config configs/prior_bdh.yaml`
+
+For MaskGIT prior:
+
+`python sample_images.py --config configs/prior_maskgit.yaml`
+
+For PixelCNN prior:
+
+`python sample_images.py --config configs/prior_pixelcnn.yaml`
+
+For PixelSNAIL prior:
+
+`python sample_images.py --config configs/prior_pixelsnail.yaml`
+
+### Step 5: Evaluate
+
+For BDH prior:
+
+`python eval_metrics.py --prior_config configs/prior_bdh.yaml`
+
+For MaskGIT prior:
+
+`python eval_metrics.py --prior_config configs/prior_maskgit.yaml`
+
+For PixelCNN prior:
+
+`python eval_metrics.py --prior_config configs/prior_pixelcnn.yaml`
+
+For PixelSNAIL prior:
+
+`python eval_metrics.py --prior_config configs/prior_pixelsnail.yaml`
+
+## SLURM/Cluster
 
 Use `oscar_script.sh` for cluster execution. Uncomment the lines for the prior you want to train/evaluate.
 
