@@ -2,11 +2,14 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from models.priors.bdh import BDHPrior
+from models.priors.pixelcnn import PixelCNNPrior
+from models.priors.pixelsnail import PixelSNAILPrior
 from utils import load_config, Logger 
 import argparse
 import os
 import time
 from torch.cuda.amp import GradScaler
+from models.priors.maskgit import MaskGITPrior
 
 def calculate_accuracy(logits, targets, k=1):
     """Compute top-k accuracy."""
@@ -15,6 +18,23 @@ def calculate_accuracy(logits, targets, k=1):
         # pred_indices: [B*T, k], targets: [B*T]
         correct = pred_indices.eq(targets.view(-1, 1).expand_as(pred_indices))
         return correct.sum().float() / targets.numel()
+
+def get_prior_model(conf):
+    """Factory function to get the appropriate prior model based on config."""
+    # Check for model name or type in config
+    model_name = getattr(conf, 'name', None) or getattr(conf, 'type', None)
+    
+    if model_name == 'PixelCNNPrior' or 'pixelcnn' in str(model_name).lower():
+        return PixelCNNPrior(config=conf)
+    elif model_name == 'PixelSNAILPrior' or 'pixelsnail' in str(model_name).lower():
+        return PixelSNAILPrior(config=conf)
+    elif model_name == 'MaskGITPrior' or 'maskgit' in str(model_name).lower():
+        return MaskGITPrior(config=conf)
+    elif model_name == 'BDHPrior' or 'bdh' in str(model_name).lower():
+        return BDHPrior(conf)
+    else:
+        # Default to BDH for backward compatibility
+        return BDHPrior(conf)
 
 def train():
     parser = argparse.ArgumentParser()
@@ -26,7 +46,10 @@ def train():
     
     # Initialize Logger
     logger = Logger("logs/prior_train.log")
-    logger.log(f"Starting BDH Prior training on {device}")
+    
+    # Detect model type for logging
+    model_name = getattr(conf, 'name', None) or getattr(conf, 'type', None) or 'BDH'
+    logger.log(f"Starting {model_name} Prior training on {device}")
     
     # Load Codes
     if not os.path.exists("data/codes/ffhq_train.pt"):
@@ -38,7 +61,7 @@ def train():
     
     loader = DataLoader(dataset, batch_size=conf.batch_size, shuffle=True, num_workers=4, pin_memory=True)
     
-    model = BDHPrior(conf).to(device)
+    model = get_prior_model(conf).to(device)
 
     try:
         model = torch.compile(model)
@@ -60,17 +83,25 @@ def train():
 
     start_time = time.time()
     
+    # Detect if using MaskGIT (needs MLM training)
+    is_maskgit = 'maskgit' in str(model_name).lower()
+    
     while step < total_steps:
         for batch in loader:
             codes = batch[0].to(device, non_blocking=True).long()
             
-            # Prepend BOS
-            bs = codes.size(0)
-            bos = torch.full((bs, 1), bos_token, device=device, dtype=torch.long)
-            full_seq = torch.cat((bos, codes), dim=1)
-            
-            inp = full_seq[:, :-1]
-            tgt = full_seq[:, 1:]
+            if is_maskgit:
+                # MaskGIT: MLM training (no BOS prepending needed)
+                # The model handles masking internally
+                inp = codes  # [B, 256]
+                tgt = codes  # [B, 256] - same as input for MLM
+            else:
+                # Autoregressive training: prepend BOS
+                bs = codes.size(0)
+                bos = torch.full((bs, 1), bos_token, device=device, dtype=torch.long)
+                full_seq = torch.cat((bos, codes), dim=1)
+                inp = full_seq[:, :-1]
+                tgt = full_seq[:, 1:]
             
             optimizer.zero_grad(set_to_none=True)
             

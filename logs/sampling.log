@@ -1,4 +1,4 @@
---- Starting Image Sampling (N=16, T=0.8, Top-p=0.9) ---
+--- Starting Image Sampling (N=16, T=1.0, Top-p=0.9) ---
 Loading checkpoint from checkpoints/vqvae_best.pt
 Loading checkpoint from checkpoints/prior_best.pt
 Vocab Size: 1025 | Block Size: 256

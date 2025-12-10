@@ -1,0 +1,28 @@
+# configs/prior_maskgit.yaml
+# Config for the MaskGITPrior (non-autoregressive)
+
+model:
+  name: MaskGITPrior
+  vocab_size: 1024           # VQ-VAE codebook size (1024 codes)
+  d_model: 512              # Model dimension
+  n_layer: 12               # Number of transformer layers
+  n_head: 8                 # Number of attention heads
+  block_size: 256           # 16x16 grid (matches data shape)
+  dropout: 0.1
+  mlm_probability: 0.15     # Probability of masking tokens during MLM training
+
+training:
+  batch_size: 128
+  learning_rate: 1e-4        # Lower LR for transformer stability
+  max_iters: 100000
+  warmup_iters: 2000
+  log_interval: 100
+  save_interval: 5000
+  seed: 42
+  save_path: checkpoints/maskgit_prior.pt
+
+sampling:
+  temperature: 1.5
+  n_steps: 8                # Number of iterative refinement steps
+  schedule: 'cosine'        # 'cosine' or 'linear'
+  sampling_top_k: 100      # Top-k sampling at each step

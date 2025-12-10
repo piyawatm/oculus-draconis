@@ -23,4 +23,19 @@ nvidia-smi
 # python train_prior.py
 # python sample_images.py --temp 0.8 --top_p 0.9
 
-python eval_metrics.py
+# python eval_metrics.py
+
+# PixelCNN Prior
+# python train_prior.py --config configs/prior_pixelcnn.yaml
+# python sample_images.py --config configs/prior_pixelcnn.yaml
+# python eval_metrics.py --prior_config configs/prior_pixelcnn.yaml
+
+# PixelSNAIL Prior
+# python train_prior.py --config configs/prior_pixelsnail.yaml
+# python sample_images.py --config configs/prior_pixelsnail.yaml
+# python eval_metrics.py --prior_config configs/prior_pixelsnail.yaml
+
+# MaskGIT Prior
+python train_prior.py --config configs/prior_maskgit.yaml
+# python sample_images.py --config configs/prior_maskgit.yaml
+# python eval_metrics.py --prior_config configs/prior_maskgit.yaml

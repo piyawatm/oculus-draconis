@@ -1,0 +1,13 @@
+{
+  "model": "bdh_vqvae",
+  "dataset": "cifar10",
+  "metrics": {
+    "psnr_mean": 25.45594249687195,
+    "psnr_std": 2.4649889106596232,
+    "lpips_mean": 0.044082576239109036,
+    "lpips_std": 0.001901330316808533,
+    "mse_mean": 0.013250415213406086,
+    "mse_std": 0.007449514232575893,
+    "codebook_usage": 0.525390625
+  }
+}
