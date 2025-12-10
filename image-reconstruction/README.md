@@ -17,27 +17,36 @@ Main differences from standard attention:
 
 ## Setup
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 ## Running
 
 Follow the steps in `oscar_script.sh`:
 
 ### 1. Check files
-python check_files.py
+
+`python check_files.py`
 
 ### 2. Verify BDH implementation
-python verify_bdh.py
+
+`python verify_bdh.py`
 
 ### 3. Train
-python train.py --model bdh_vqvae --dataset cifar10 --epochs 100
+
+`python train.py --model bdh_vqvae --dataset cifar10 --epochs 100`
 
 ### 4. Evaluate
-python evaluate.py --model bdh_vqvae --dataset cifar10
+
+`python evaluate.py --model bdh_vqvae --dataset cifar10`
 
 ### 5. Compare models
-python compare.py --models vqvae vqvae2 bdh_vqvae --generate-imagesFor cluster/SLURM:
-sbatch oscar_script.sh
+
+`python compare.py --models vqvae vqvae2 bdh_vqvae --generate-images`
+
+## For cluster/SLURM:
+
+Full end-to-end training and evaluation
+`sbatch oscar_script.sh`
 
 ## Results
 
