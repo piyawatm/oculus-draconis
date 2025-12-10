@@ -1,0 +1,23 @@
+Epoch 000 | loss=1.944185 | time=428.78s | total=7.1min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch001.pt
+Epoch 001 | loss=0.142146 | time=427.52s | total=14.3min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch002.pt
+Epoch 002 | loss=0.087252 | time=427.32s | total=21.4min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch003.pt
+Epoch 003 | loss=0.076041 | time=427.30s | total=28.5min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch004.pt
+Epoch 004 | loss=0.071568 | time=427.32s | total=35.6min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch005.pt
+Epoch 005 | loss=0.064818 | time=427.33s | total=42.8min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch006.pt
+Epoch 006 | loss=0.056130 | time=427.33s | total=49.9min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch007.pt
+Epoch 007 | loss=0.041158 | time=427.33s | total=57.0min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch008.pt
+Epoch 008 | loss=0.027853 | time=427.35s | total=64.1min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch009.pt
+Epoch 009 | loss=0.015709 | time=427.30s | total=71.2min
+Checkpoint saved → checkpoints/bdh_prior.pt_epoch010.pt
+Final checkpoint saved → checkpoints/bdh_prior.pt
+Total training time: 71.25 minutes (1.19 hours)
+Average epoch time: 427.49 seconds

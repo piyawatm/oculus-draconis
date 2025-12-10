@@ -11,9 +11,13 @@ __pycache__/
 # Ignore VSCode settings
 .vscode/
 # Ignore log files
-*.log
+# *.log
 # Ignore data and results
 /data/
 /results/
-# Ignore model checkpoints
-/checkpoints/
+data/cifar-10-python.tar.gz
+csci2470fp/
+slurm-*.out
+output_*.txt
+eval_fake/
+eval_real/

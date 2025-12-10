@@ -1,0 +1,55 @@
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt
+==================================================
+Wrote samples_bdh_prior.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch001.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch001.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch002.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch002.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch003.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch003.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch004.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch004.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch005.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch005.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch006.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch006.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch007.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch007.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch008.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch008.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch009.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch009.png
+
+==================================================
+Sampling from: checkpoints/bdh_prior.pt_epoch010.pt
+==================================================
+Wrote samples_bdh_prior.pt_epoch010.png

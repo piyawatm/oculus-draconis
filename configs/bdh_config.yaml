@@ -1,0 +1,27 @@
+model:
+  type: "BDH"
+  vocab_size: 1025      # 1024 codes + 1 BOS
+  block_size: 256       # 16x16 grid from 64x64 images
+  
+  # SCALED UP ARCHITECTURE (The "Fix")
+  n_layer: 16           # 16 is deep enough
+  d_model: 512          # Doubled width (was 256). Critical for sharpness.
+  n_head: 8             # Head dim = 64 (Standard)
+  
+  # BDH Specifics
+  latent_dim: 2048      # 4x Expansion (512 -> 2048). Massive associative memory.
+  radius: 3             # 3x3 local attention radius
+  
+  dropout: 0.1
+
+training:
+  batch_size: 128        # Keep 64 to fit in GPU memory (adjust if OOM)
+  learning_rate: 0.0003 # 3e-4 is standard for this size
+  max_iters: 200000     # Increased to 200k. High-quality faces take time.
+  warmup_iters: 2000
+  log_interval: 100
+  save_interval: 5000
+
+data:
+  dataset: "ffhq64"
+  image_size: 64
