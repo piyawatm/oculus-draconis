@@ -1,4 +1,4 @@
-# Dragon
+# Oculus Draconis
 
 Biologically Inspired Sparse Graph Model for Image Generation
 
