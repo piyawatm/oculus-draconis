@@ -206,7 +206,7 @@ class MaskGITPrior(ARPrior):
             sampling_top_k: top-k sampling at each step
         
         Returns:
-            tokens: [B, block_size] generated tokens
+            tokens: [B, block_size] generated tokens (all in range [0, vocab_size-1])
         """
         self.eval()
         B = idx.size(0)
@@ -229,7 +229,7 @@ class MaskGITPrior(ARPrior):
                 v, _ = torch.topk(logits, min(sampling_top_k, logits.size(-1)), dim=-1)
                 logits[logits < v[..., -1:]] = float("-inf")
             
-            # Sample tokens
+            # Sample tokens (only from valid vocab range [0, vocab_size-1])
             probs = F.softmax(logits, dim=-1)
             sampled_ids = torch.multinomial(
                 probs.reshape(-1, self.vocab_size),
@@ -246,18 +246,20 @@ class MaskGITPrior(ARPrior):
             n_masked = mask.sum(dim=1).float()
             
             if step == n_steps - 1:
-                # Last step: unmask all
+                # Last step: unmask ALL remaining tokens
                 n_to_unmask = n_masked.int()
             else:
                 # Calculate target mask ratio for next step
                 mask_ratio_next = self._get_mask_ratio(step + 1, n_steps, schedule)
-                n_masked_target = (T * mask_ratio_next).int()
+                n_masked_target = torch.full((B,), T * mask_ratio_next, device=device, dtype=torch.float)
                 n_to_unmask = (n_masked - n_masked_target).int().clamp(min=1)
             
             n_to_unmask = torch.min(n_to_unmask, n_masked.int())
             
             if (n_to_unmask == 0).all():
-                break
+                # All tokens unmasked, but ensure we complete the last step
+                if step < n_steps - 1:
+                    break
             
             # Unmask most confident tokens per batch
             for i in range(B):
@@ -271,6 +273,30 @@ class MaskGITPrior(ARPrior):
                 # Update tokens and mask
                 tokens[i, top_indices] = sampled_ids[i, top_indices]
                 mask[i, top_indices] = False
+        
+        # CRITICAL: Ensure all mask tokens are replaced in the final step
+        # If any mask tokens remain, replace them with the sampled predictions
+        remaining_mask = tokens == self.mask_token_id
+        if remaining_mask.any():
+            # Get final predictions for remaining positions
+            logits, _ = self(tokens, targets=None)
+            logits = logits / max(1e-8, temperature)
+            
+            if sampling_top_k is not None:
+                v, _ = torch.topk(logits, min(sampling_top_k, logits.size(-1)), dim=-1)
+                logits[logits < v[..., -1:]] = float("-inf")
+            
+            probs = F.softmax(logits, dim=-1)
+            final_sampled = torch.multinomial(
+                probs.reshape(-1, self.vocab_size),
+                num_samples=1
+            ).view(B, T)
+            
+            # Replace any remaining mask tokens
+            tokens[remaining_mask] = final_sampled[remaining_mask]
+        
+        # Final validation: ensure all tokens are in valid range [0, vocab_size-1]
+        tokens = torch.clamp(tokens, min=0, max=self.vocab_size - 1)
         
         return tokens
     

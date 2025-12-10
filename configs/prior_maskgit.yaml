@@ -22,7 +22,7 @@ training:
   save_path: checkpoints/maskgit_prior.pt
 
 sampling:
-  temperature: 1.5
-  n_steps: 8                # Number of iterative refinement steps
-  schedule: 'cosine'        # 'cosine' or 'linear'
-  sampling_top_k: 100      # Top-k sampling at each step
+  temperature: 2.5    # Increased for diversity
+  n_steps: 16        # More refinement steps  
+  schedule: 'linear' # Try linear schedule
+  sampling_top_k: 200 # More diverse sampling

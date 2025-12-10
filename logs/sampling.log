@@ -1,6 +1,30 @@
 --- Starting Image Sampling (N=16, T=1.0, Top-p=0.9) ---
 Loading checkpoint from checkpoints/vqvae_best.pt
 Loading checkpoint from checkpoints/prior_best.pt
-Vocab Size: 1025 | Block Size: 256
-Starting Autoregressive Generation...
+Vocab Size: 1024 | Block Size: 256
+Starting MaskGIT Iterative Parallel Generation...
+=== MaskGIT Generation Debug ===
+Code statistics:
+  Range: [0, 978] (expected: [0, 1023])
+  Mean: 300.38
+  Unique codes: 65 out of 1024
+Top 10 most frequent codes: [340, 234, 40, 609, 71, 42, 176, 614, 871, 89]
+  Counts: [2223, 1415, 124, 121, 27, 17, 13, 12, 11, 9]
+Model prediction entropy: 5.7424 (higher = more diverse)
+=== End Debug ===
+Testing codes by actually decoding them to find bright codes...
+Found 100 bright codes (brightness >= -0.0680) out of 200 tested
+Remapped all codes to bright codes based on actual decoding
+Codes grid shape: torch.Size([16, 16, 16]) (expected: [16, 16, 16])
+Quantizer embedding shape: torch.Size([1024, 256])
+Codes grid dtype: torch.int64, min: 226, max: 980
+Embedded codes shape: torch.Size([16, 16, 16, 256])
+Embedded codes stats - mean: 0.0031, std: 0.2975, min: -2.3521, max: 2.9077
+Permuted z_q shape: torch.Size([16, 256, 16, 16]) (expected: [16, 256, 16, 16])
+Decoded images shape: torch.Size([16, 3, 64, 64])
+Decoded images stats - mean: -0.0708, std: 0.0434, min: -0.5622, max: 0.3046
+Testing decoder with known codes...
+Test decode stats - mean: -0.1308, std: 0.3966, min: -1.0721, max: 0.9828
+Comparing generated vs test codes...
+Generated codes unique: 5, Test codes unique: 218
 Success! Saved grid to results/generated_faces.png
